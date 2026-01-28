@@ -1,0 +1,120 @@
+from __future__ import annotations
+
+import logging
+import time
+from collections import defaultdict, deque
+
+import discord
+from discord.ext import commands
+from discord import app_commands
+
+from config import (
+    DISCORD_TOKEN,
+    LOG_LEVEL,
+    DATA_DIR,
+    CACHE_DIR,
+)
+from db import init_db
+from utils.ai_client import AIClient
+
+
+COGS = [
+    "cogs.setup",
+    "cogs.presence",
+    "cogs.logging",
+    "cogs.welcome",
+    "cogs.moderation",
+    "cogs.music",
+    "cogs.ai_chat",
+    "cogs.levels",
+    "cogs.economy",
+    "cogs.games",
+    "cogs.utility",
+    "cogs.tickets",
+    "cogs.roles",
+    "cogs.polls",
+    "cogs.profile",
+    "cogs.encyclopedia",
+    "cogs.links",
+]
+
+
+class RateLimitCommandTree(app_commands.CommandTree):
+    def __init__(self, client: commands.Bot) -> None:
+        super().__init__(client)
+        self._user_buckets: dict[int, deque[float]] = defaultdict(deque)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.type is discord.InteractionType.autocomplete:
+            return True
+        if interaction.guild is None:
+            try:
+                message = "Bot này chỉ dùng trong server, không nhận lệnh qua DM."
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(message, ephemeral=True)
+                else:
+                    await interaction.followup.send(message, ephemeral=True)
+            except Exception:
+                pass
+            return False
+        user = interaction.user
+        if user is None:
+            return True
+        now = time.monotonic()
+        bucket = self._user_buckets[user.id]
+        while bucket and now - bucket[0] > 5.0:
+            bucket.popleft()
+        if len(bucket) >= 3:
+            try:
+                message = "Bạn dùng lệnh nhanh quá (3 lệnh/5s). Chờ chút nhé."
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(message, ephemeral=True)
+                else:
+                    await interaction.followup.send(message, ephemeral=True)
+            except Exception:
+                pass
+            return False
+        bucket.append(now)
+        return True
+
+
+class TetoBot(commands.Bot):
+    def __init__(self) -> None:
+        intents = discord.Intents.default()
+        intents.message_content = True
+        intents.members = True
+        intents.voice_states = True
+        super().__init__(command_prefix="!", intents=intents, tree_cls=RateLimitCommandTree)
+        self.ai_client = AIClient()
+
+    async def setup_hook(self) -> None:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        await init_db()
+        for ext in COGS:
+            try:
+                await self.load_extension(ext)
+            except Exception as exc:
+                logging.exception("Failed to load %s: %s", ext, exc)
+        try:
+            await self.tree.sync()
+        except Exception as exc:
+            logging.exception("Command sync failed: %s", exc)
+
+    async def on_ready(self) -> None:
+        logging.info("Logged in as %s (ID: %s)", self.user, self.user.id if self.user else "unknown")
+
+
+def main() -> None:
+    logging.basicConfig(
+        level=LOG_LEVEL,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
+    if not DISCORD_TOKEN:
+        raise RuntimeError("DISCORD_TOKEN is missing")
+    bot = TetoBot()
+    bot.run(DISCORD_TOKEN)
+
+
+if __name__ == "__main__":
+    main()
