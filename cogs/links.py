@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import discord
 from discord import app_commands
@@ -6,7 +6,7 @@ from discord.ext import commands
 
 
 TETO_CODE_URL = "https://github.com/yukkisensei/Teto"
-TETOREA_URL = "https://discord.gg/tetooo"
+TETOREA_URL = "https://discord.gg/35P2xNnemF"
 
 
 class LinksCog(commands.Cog):
