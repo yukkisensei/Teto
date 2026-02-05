@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import aiosqlite
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
@@ -34,6 +35,12 @@ CREATE TABLE IF NOT EXISTS guild_config (
     music_channel_id INTEGER,
     mod_role_id INTEGER,
     auto_role_id INTEGER,
+    verify_channel_id INTEGER,
+    verify_role_id INTEGER,
+    verify_message_id INTEGER,
+    verify_enabled INTEGER,
+    giveaway_channel_id INTEGER,
+    giveaway_enabled INTEGER,
     locale TEXT,
     ai_enabled INTEGER,
     music_enabled INTEGER,
@@ -241,6 +248,35 @@ CREATE TABLE IF NOT EXISTS events (
     created_by INTEGER NOT NULL,
     created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS verify_codes (
+    guild_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    code TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (guild_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS giveaways (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    channel_id INTEGER NOT NULL,
+    message_id INTEGER NOT NULL,
+    prize TEXT NOT NULL,
+    winner_count INTEGER NOT NULL,
+    ends_at TEXT NOT NULL,
+    created_by INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    ended_at TEXT,
+    winners_json TEXT
+);
+
+CREATE TABLE IF NOT EXISTS giveaway_entries (
+    giveaway_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    PRIMARY KEY (giveaway_id, user_id)
+);
 """
 
 DEFAULT_CONFIG = {
@@ -251,6 +287,12 @@ DEFAULT_CONFIG = {
     "music_channel_id": None,
     "mod_role_id": None,
     "auto_role_id": None,
+    "verify_channel_id": None,
+    "verify_role_id": None,
+    "verify_message_id": None,
+    "verify_enabled": 1,
+    "giveaway_channel_id": None,
+    "giveaway_enabled": 1,
     "locale": DEFAULT_LOCALE,
     "ai_enabled": 1,
     "music_enabled": 1,
@@ -292,6 +334,12 @@ GUILD_CONFIG_COLUMNS = [
     ("music_channel_id", "INTEGER", None),
     ("mod_role_id", "INTEGER", None),
     ("auto_role_id", "INTEGER", None),
+    ("verify_channel_id", "INTEGER", None),
+    ("verify_role_id", "INTEGER", None),
+    ("verify_message_id", "INTEGER", None),
+    ("verify_enabled", "INTEGER", 1),
+    ("giveaway_channel_id", "INTEGER", None),
+    ("giveaway_enabled", "INTEGER", 1),
     ("locale", "TEXT", DEFAULT_LOCALE),
     ("ai_enabled", "INTEGER", 1),
     ("music_enabled", "INTEGER", 1),
@@ -1000,4 +1048,136 @@ async def list_upcoming_events(guild_id: int, now_iso: str, limit: int = 10) -> 
 async def delete_event(event_id: int) -> None:
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("DELETE FROM events WHERE id = ?", (event_id,))
+        await db.commit()
+
+
+async def set_verify_code(guild_id: int, user_id: int, code: str, expires_at: str) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO verify_codes (guild_id, user_id, code, expires_at, created_at) VALUES (?, ?, ?, ?, ?)\n"
+            "ON CONFLICT(guild_id, user_id) DO UPDATE SET code=excluded.code, expires_at=excluded.expires_at, created_at=excluded.created_at",
+            (guild_id, user_id, code, expires_at, _utcnow()),
+        )
+        await db.commit()
+
+
+async def get_verify_code(guild_id: int, user_id: int) -> Optional[Dict[str, Any]]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        row = await _fetchone(
+            db,
+            "SELECT code, expires_at, created_at FROM verify_codes WHERE guild_id = ? AND user_id = ?",
+            (guild_id, user_id),
+        )
+        return dict(row) if row else None
+
+
+async def delete_verify_code(guild_id: int, user_id: int) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "DELETE FROM verify_codes WHERE guild_id = ? AND user_id = ?",
+            (guild_id, user_id),
+        )
+        await db.commit()
+
+
+async def delete_expired_verify_codes(now_iso: str) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "DELETE FROM verify_codes WHERE expires_at <= ?",
+            (now_iso,),
+        )
+        await db.commit()
+
+
+async def create_giveaway(
+    guild_id: int,
+    channel_id: int,
+    message_id: int,
+    prize: str,
+    winner_count: int,
+    ends_at: str,
+    created_by: int,
+) -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "INSERT INTO giveaways (guild_id, channel_id, message_id, prize, winner_count, ends_at, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (guild_id, channel_id, message_id, prize, winner_count, ends_at, created_by, _utcnow()),
+        )
+        await db.commit()
+        return cursor.lastrowid
+
+
+async def get_giveaway(giveaway_id: int) -> Optional[Dict[str, Any]]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        row = await _fetchone(db, "SELECT * FROM giveaways WHERE id = ?", (giveaway_id,))
+        return dict(row) if row else None
+
+
+async def get_giveaway_by_message(message_id: int) -> Optional[Dict[str, Any]]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        row = await _fetchone(db, "SELECT * FROM giveaways WHERE message_id = ?", (message_id,))
+        return dict(row) if row else None
+
+
+async def list_open_giveaways(now_iso: str) -> List[Dict[str, Any]]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        rows = await _fetchall(
+            db,
+            "SELECT * FROM giveaways WHERE ended_at IS NULL AND ends_at > ?",
+            (now_iso,),
+        )
+        return [dict(r) for r in rows]
+
+
+async def list_due_giveaways(now_iso: str) -> List[Dict[str, Any]]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        rows = await _fetchall(
+            db,
+            "SELECT * FROM giveaways WHERE ended_at IS NULL AND ends_at <= ?",
+            (now_iso,),
+        )
+        return [dict(r) for r in rows]
+
+
+async def close_giveaway(giveaway_id: int, winners: List[int], ended_at: str) -> None:
+    winners_json = json.dumps(winners)
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE giveaways SET ended_at = ?, winners_json = ? WHERE id = ?",
+            (ended_at, winners_json, giveaway_id),
+        )
+        await db.commit()
+
+
+async def add_giveaway_entry(giveaway_id: int, user_id: int) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "INSERT OR IGNORE INTO giveaway_entries (giveaway_id, user_id) VALUES (?, ?)",
+            (giveaway_id, user_id),
+        )
+        await db.commit()
+        return cursor.rowcount > 0
+
+
+async def list_giveaway_entries(giveaway_id: int) -> List[int]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        rows = await _fetchall(
+            db,
+            "SELECT user_id FROM giveaway_entries WHERE giveaway_id = ?",
+            (giveaway_id,),
+        )
+        return [r[0] for r in rows]
+
+
+async def delete_giveaway_entries(giveaway_id: int) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "DELETE FROM giveaway_entries WHERE giveaway_id = ?",
+            (giveaway_id,),
+        )
         await db.commit()

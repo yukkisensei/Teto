@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import logging
 import time
@@ -24,12 +24,15 @@ COGS = [
     "cogs.logging",
     "cogs.welcome",
     "cogs.moderation",
+    "cogs.verification",
     "cogs.music",
     "cogs.ai_chat",
     "cogs.levels",
     "cogs.economy",
     "cogs.games",
     "cogs.utility",
+    "cogs.giveaway",
+    "cogs.extras",
     "cogs.tickets",
     "cogs.roles",
     "cogs.polls",

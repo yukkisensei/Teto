@@ -92,7 +92,6 @@ class ModerationCog(commands.Cog):
             if await is_moderator(message.author):
                 return
 
-        # Anti mention spam
         max_mentions = int(cfg.get("max_mentions") or MAX_MENTIONS)
         if max_mentions > 0 and len(message.mentions) >= max_mentions:
             try:
@@ -105,7 +104,6 @@ class ModerationCog(commands.Cog):
 
         content_lower = (message.content or "").lower()
 
-        # Blocked words
         if content_lower:
             blocked = await list_blocked_words(message.guild.id)
             for word in blocked:
@@ -117,7 +115,6 @@ class ModerationCog(commands.Cog):
                     await add_warning(message.guild.id, message.author.id, self.bot.user.id if self.bot.user else 0, f"Blocked word: {word}")
                     return
 
-        # Anti-invite
         if cfg.get("anti_invite_enabled") and INVITE_RE.search(content_lower):
             try:
                 await message.delete()
@@ -126,7 +123,6 @@ class ModerationCog(commands.Cog):
             await add_warning(message.guild.id, message.author.id, self.bot.user.id if self.bot.user else 0, "Invite link")
             return
 
-        # Anti-link
         if cfg.get("anti_link_enabled") and LINK_RE.search(content_lower):
             try:
                 await message.delete()
@@ -135,7 +131,6 @@ class ModerationCog(commands.Cog):
             await add_warning(message.guild.id, message.author.id, self.bot.user.id if self.bot.user else 0, "Link not allowed")
             return
 
-        # Anti-NSFW (simple keyword filter for non-NSFW channels)
         if cfg.get("anti_nsfw_enabled") and isinstance(message.channel, discord.TextChannel) and not message.channel.is_nsfw():
             if any(word in content_lower for word in NSFW_WORDS):
                 try:
@@ -145,7 +140,6 @@ class ModerationCog(commands.Cog):
                 await add_warning(message.guild.id, message.author.id, self.bot.user.id if self.bot.user else 0, "NSFW content")
                 return
 
-        # Anti spam rate
         if cfg.get("anti_spam_enabled"):
             now = datetime.now(timezone.utc).timestamp()
             bucket = self.message_timestamps[message.guild.id][message.author.id]
@@ -163,7 +157,6 @@ class ModerationCog(commands.Cog):
                 await add_warning(message.guild.id, message.author.id, self.bot.user.id if self.bot.user else 0, "Spam detected")
                 return
 
-            # Duplicate spam check
             content_bucket = self.message_content[message.guild.id][message.author.id]
             content_bucket.append(content_lower)
             while len(content_bucket) > 3:

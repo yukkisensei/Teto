@@ -1,26 +1,29 @@
 # Teto Discord Bot
 
-All-in-one Discord bot themed around Kasane Teto. Built with Python + discord.py.
+All in one Discord bot themed around Kasane Teto. Built with Python and discord.py.
 
 ## Features
-- Quick setup presets (Small / Medium / Gaming / Fanclub)
-- Moderation: warnings, timeout, anti-spam, anti-raid, blocked words, invite filter
-- Music: SoundCloud + direct URL playback (queue, loop, skip)
+- Quick setup presets (Small, Medium, Gaming, Fanclub)
+- Moderation: warnings, timeout, anti spam, anti raid, blocked words, invite filter
+- Music powered by Lavalink (queue, loop, skip)
 - AI chat (Kasane Teto persona) via Groq API
-- Leveling + daily tasks + badges
-- Tickets, role menus, auto-role
+- Two step verification with button and 6 digit code
+- Giveaways with join button and scheduled winners
+- Leveling, daily tasks, badges
+- Tickets, role menus, auto role
 - Reminders, events, birthdays
 - Polls with buttons
-- Mini-games (fishing, Pokemon, trivia, typing)
-- Profile card + economy shop
+- Mini games (fishing, Pokemon, trivia, typing)
+- Profile card and economy shop
+- Utility commands (ping, avatar, server info)
 
 ## Setup
 1) Install Python 3.11+
-2) Install ffmpeg and make sure `ffmpeg` is in PATH
+2) Install Java 17+ and run a Lavalink server
 3) Install dependencies:
    - `pip install -r requirements.txt`
 4) Create a `.env` file and fill in values (see below)
-5) In Discord Developer Portal, enable **Message Content Intent** and **Server Members Intent**
+5) In Discord Developer Portal, enable Message Content Intent and Server Members Intent
 6) Run:
    - `python main.py`
 
@@ -32,10 +35,11 @@ GOD_MODE_ENABLED=1
 GROQ_API_KEY=
 GROQ_MODEL=llama-3.1-8b-instant
 GROQ_BASE_URL=https://api.groq.com/openai/v1
-SOUNDCLOUD_CLIENT_ID=
-SOUNDCLOUD_CLIENT_SECRET=
-SOUNDCLOUD_API_BASE=https://api.soundcloud.com
-SOUNDCLOUD_OAUTH_URL=https://secure.soundcloud.com/oauth/token
+
+LAVALINK_HOST=localhost
+LAVALINK_PORT=2333
+LAVALINK_PASSWORD=youshallnotpass
+LAVALINK_SECURE=0
 
 PRESENCE_STATUS=dnd
 PRESENCE_ACTIVITY_TYPE=playing
@@ -55,7 +59,8 @@ CACHE_TTL_MINUTES=1440
 CACHE_MAX_GB=10
 MUSIC_QUALITY=bestaudio
 MUSIC_MAX_QUEUE=100
-FFMPEG_PATH=ffmpeg
+
+VERIFY_CODE_TTL_MINUTES=10
 
 AI_COOLDOWN_SECONDS=8
 MAX_AI_HISTORY=8
@@ -84,14 +89,16 @@ BOT_RATIO_MAX=0.6
 ```
 
 ## Notes
-- SoundCloud playback requires API credentials (client id/secret). Set them in `.env`.
-- The AI persona is locked to Kasane Teto. Edit `utils/ai_client.py` if you want to adjust style.
+- Lavalink must be running and reachable by the bot.
+- The AI persona is locked to Kasane Teto. Edit `utils/ai_client.py` to adjust style.
 
 ## Commands (high level)
-- `/setup preset`, `/setup channels`, `/setup language`, `/setup summary`
+- `/setup preset`, `/setup channels`, `/setup verify`, `/setup giveaway`, `/setup language`, `/setup summary`
 - `/warn`, `/warnings`, `/timeout`, `/kick`, `/ban`, `/purge`
-- `/play`, `/queue`, `/skip`, `/loop`
+- `/join`, `/play`, `/playurl`, `/queue`, `/skip`, `/loop`, `/nowplaying`
 - `/ai`
+- `/verify`, `/verify_resend`
+- `/giveaway create`, `/giveaway end`, `/giveaway reroll`, `/giveaway list`
 - `/rank`, `/leaderboard`, `/profile`
 - `/daily`, `/balance`, `/shop`, `/buy`
 - `/ticket`, `/ticket_close`
@@ -99,3 +106,4 @@ BOT_RATIO_MAX=0.6
 - `/remind`, `/event_create`, `/event_list`, `/birthday`
 - `/poll`
 - `/links`
+- `/ping`, `/avatar`, `/serverinfo`, `/userinfo`, `/uptime`

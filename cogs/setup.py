@@ -7,6 +7,7 @@ from discord.ext import commands
 from db import get_guild_config, update_guild_config
 from utils.i18n import t
 from utils.checks import is_moderator
+from cogs.verification import VerifyView
 
 
 PRESETS = {
@@ -18,6 +19,8 @@ PRESETS = {
         "economy_enabled": 1,
         "tickets_enabled": 1,
         "roles_enabled": 1,
+        "verify_enabled": 1,
+        "giveaway_enabled": 1,
         "reminders_enabled": 1,
         "polls_enabled": 1,
         "logging_enabled": 1,
@@ -33,6 +36,8 @@ PRESETS = {
         "economy_enabled": 1,
         "tickets_enabled": 1,
         "roles_enabled": 1,
+        "verify_enabled": 1,
+        "giveaway_enabled": 1,
         "reminders_enabled": 1,
         "polls_enabled": 1,
         "logging_enabled": 1,
@@ -48,6 +53,8 @@ PRESETS = {
         "economy_enabled": 1,
         "tickets_enabled": 1,
         "roles_enabled": 1,
+        "verify_enabled": 1,
+        "giveaway_enabled": 1,
         "reminders_enabled": 1,
         "polls_enabled": 1,
         "logging_enabled": 1,
@@ -63,6 +70,8 @@ PRESETS = {
         "economy_enabled": 1,
         "tickets_enabled": 1,
         "roles_enabled": 1,
+        "verify_enabled": 1,
+        "giveaway_enabled": 1,
         "reminders_enabled": 1,
         "polls_enabled": 1,
         "logging_enabled": 1,
@@ -146,6 +155,60 @@ class SetupCog(commands.Cog):
             await update_guild_config(interaction.guild.id, **updates)
         await interaction.response.send_message(t(locale, "setup_channels_done"), ephemeral=True)
 
+    @setup_group.command(name="verify", description="Set up the verification channel and role.")
+    @app_commands.describe(
+        role="Role to grant after verification",
+        channel="Verification channel",
+        message="Custom verification message",
+    )
+    async def verify(
+        self,
+        interaction: discord.Interaction,
+        role: discord.Role,
+        channel: discord.TextChannel | None = None,
+        message: str | None = None,
+    ) -> None:
+        if not interaction.guild or not isinstance(interaction.user, discord.Member):
+            return
+        cfg = await get_guild_config(interaction.guild.id)
+        locale = cfg.get("locale") or "en"
+        if not await is_moderator(interaction.user):
+            await interaction.response.send_message(t(locale, "no_permission"), ephemeral=True)
+            return
+        target_channel = channel or interaction.channel
+        if not isinstance(target_channel, discord.TextChannel):
+            await interaction.response.send_message("Invalid channel.", ephemeral=True)
+            return
+        text = message or "Press Verify to start. You will receive a 6 digit code in DM and complete with /verify."
+        embed = discord.Embed(title="Verification", description=text, color=discord.Color.red())
+        view = VerifyView(self.bot)
+        msg = await target_channel.send(embed=embed, view=view)
+        await update_guild_config(
+            interaction.guild.id,
+            verify_channel_id=target_channel.id,
+            verify_role_id=role.id,
+            verify_message_id=msg.id,
+            verify_enabled=1,
+        )
+        await interaction.response.send_message("Verification setup complete.", ephemeral=True)
+
+    @setup_group.command(name="giveaway", description="Set the default giveaway channel.")
+    @app_commands.describe(channel="Giveaway channel")
+    async def giveaway(self, interaction: discord.Interaction, channel: discord.TextChannel | None = None) -> None:
+        if not interaction.guild or not isinstance(interaction.user, discord.Member):
+            return
+        cfg = await get_guild_config(interaction.guild.id)
+        locale = cfg.get("locale") or "en"
+        if not await is_moderator(interaction.user):
+            await interaction.response.send_message(t(locale, "no_permission"), ephemeral=True)
+            return
+        target_channel = channel or interaction.channel
+        if not isinstance(target_channel, discord.TextChannel):
+            await interaction.response.send_message("Invalid channel.", ephemeral=True)
+            return
+        await update_guild_config(interaction.guild.id, giveaway_channel_id=target_channel.id)
+        await interaction.response.send_message("Giveaway channel updated.", ephemeral=True)
+
     @setup_group.command(name="language", description="Set the server language.")
     @app_commands.choices(
         language=[
@@ -176,6 +239,8 @@ class SetupCog(commands.Cog):
         embed.add_field(name="Economy", value="On" if cfg.get("economy_enabled") else "Off", inline=True)
         embed.add_field(name="Tickets", value="On" if cfg.get("tickets_enabled") else "Off", inline=True)
         embed.add_field(name="Roles", value="On" if cfg.get("roles_enabled") else "Off", inline=True)
+        embed.add_field(name="Verification", value="On" if cfg.get("verify_enabled") else "Off", inline=True)
+        embed.add_field(name="Giveaway", value="On" if cfg.get("giveaway_enabled") else "Off", inline=True)
         embed.add_field(name="Reminders", value="On" if cfg.get("reminders_enabled") else "Off", inline=True)
         embed.add_field(name="Polls", value="On" if cfg.get("polls_enabled") else "Off", inline=True)
         await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -202,6 +267,8 @@ class SetupCog(commands.Cog):
             app_commands.Choice(name="Economy", value="economy_enabled"),
             app_commands.Choice(name="Tickets", value="tickets_enabled"),
             app_commands.Choice(name="Roles", value="roles_enabled"),
+            app_commands.Choice(name="Verification", value="verify_enabled"),
+            app_commands.Choice(name="Giveaway", value="giveaway_enabled"),
             app_commands.Choice(name="Reminders", value="reminders_enabled"),
             app_commands.Choice(name="Polls", value="polls_enabled"),
             app_commands.Choice(name="Logging", value="logging_enabled"),
