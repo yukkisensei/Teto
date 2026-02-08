@@ -13,18 +13,14 @@ Overview
 Music behavior
 - `/play` supports source selection:
   - `Youtube` (default)
-  - `Spotify`
   - `Soundcloud`
 - `/playurl` plays direct URLs.
 - Bot joins voice with self-deaf enabled, so it does not listen in voice channel.
-- If Spotify credentials are missing, bot auto falls back to other search sources instead of hard failing.
-- Spotify links can be converted to text search fallback when direct Spotify lookup is unavailable.
 
 Audio quality notes
 - Discord always re-encodes to Opus and is capped by voice channel bitrate.
 - For cleaner playback, use higher bitrate voice channels.
-- Source quality above 256 kbps is possible only when upstream source supports it.
-- Deezer high quality path requires valid Deezer credentials in environment.
+- Lavalink is configured for high quality Opus encode and stable buffering.
 
 Requirements
 1. Python 3.11 or newer
@@ -53,13 +49,6 @@ LAVALINK_HOST=127.0.0.1
 LAVALINK_PORT=2333
 LAVALINK_PASSWORD=youshallnotpass
 LAVALINK_SECURE=0
-
-SPOTIFY_CLIENT_ID=
-SPOTIFY_CLIENT_SECRET=
-SPOTIFY_COUNTRY_CODE=US
-DEEZER_ENABLED=0
-DEEZER_ARL=
-DEEZER_MASTER_DECRYPTION_KEY=
 
 PRESENCE_STATUS=dnd
 PRESENCE_ACTIVITY_TYPE=playing
@@ -110,16 +99,11 @@ BOT_RATIO_MAX=0.6
 
 Lavalink plugin expectations
 - `youtube-plugin` enabled
-- `lavasrc-plugin` enabled for Spotify and optional Deezer resolution
-- If Deezer is enabled without required keys, Lavalink can fail to start
 
 Troubleshooting
 - No YouTube results:
   - Check Lavalink status and plugin load.
   - Check `/v4/info` and confirm `youtube` source manager is present.
-- Spotify search fails:
-  - Set `SPOTIFY_CLIENT_ID` and `SPOTIFY_CLIENT_SECRET`.
-  - Restart Lavalink after changing `.env`.
 - Stutter or unstable audio:
   - Check host CPU and memory.
   - Check network stability to Discord voice edge.
@@ -139,3 +123,5 @@ Main command groups
 
 Extra docs
 - `tutorial.md` contains step by step environment variable setup guide.
+
+For licensing or permission to use this project, contact: support@yukki.site

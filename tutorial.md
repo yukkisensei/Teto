@@ -48,31 +48,11 @@ Buoc 3. Bien cho tinh nang AI
 
 Buoc 4. Bien cho nhac chat luong cao
 
-1. Spotify
-- `SPOTIFY_CLIENT_ID`
-- `SPOTIFY_CLIENT_SECRET`
-- `SPOTIFY_COUNTRY_CODE`
-
-Cach lay Spotify ID va Secret
-- Vao `https://developer.spotify.com/dashboard`
-- Dang nhap, tao app moi
-- Vao app vua tao, copy Client ID va Client Secret
-- Dan vao `.env`
-
-2. Deezer
-- `DEEZER_ENABLED`
-- `DEEZER_ARL`
-- `DEEZER_MASTER_DECRYPTION_KEY`
-
-Luu y Deezer
-- Neu chua co day du `DEEZER_ARL` va `DEEZER_MASTER_DECRYPTION_KEY`, de:
-  - `DEEZER_ENABLED=0`
-- Chi bat `DEEZER_ENABLED=1` khi ban da co gia tri hop le tu nguon duoc phep.
-
-3. Chat luong thuc te tren Discord
+1. Chat luong thuc te tren Discord
 - Discord re-encode am thanh sang Opus.
 - Chat luong con phu thuoc bitrate cua voice channel.
 - Muon nghe on hon, dung kenh co bitrate cao (thuong 128 kbps tro len).
+- Bot da duoc cau hinh de uu tien chat luong cao va do on dinh tren Lavalink.
 
 Buoc 5. Bien co the giu mac dinh
 - `PRESENCE_STATUS`, `PRESENCE_ACTIVITY_TYPE`, `PRESENCE_ACTIVITY_TEXT`
@@ -93,14 +73,6 @@ LAVALINK_HOST=127.0.0.1
 LAVALINK_PORT=2333
 LAVALINK_PASSWORD=youshallnotpass
 LAVALINK_SECURE=0
-
-SPOTIFY_CLIENT_ID=
-SPOTIFY_CLIENT_SECRET=
-SPOTIFY_COUNTRY_CODE=US
-
-DEEZER_ENABLED=0
-DEEZER_ARL=
-DEEZER_MASTER_DECRYPTION_KEY=
 ```
 
 Buoc 7. Kiem tra nhanh sau khi sua ENV
@@ -118,3 +90,5 @@ systemctl restart teto
 Luu y bao mat
 - Khong commit file `.env` len git.
 - Neu token da lo, reset token va thay token moi ngay.
+
+For licensing or permission to use this project, contact: support@yukki.site

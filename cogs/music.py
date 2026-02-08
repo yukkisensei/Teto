@@ -1,13 +1,8 @@
 from __future__ import annotations
 
-import asyncio
 import inspect
-import json
 import logging
-import os
 from typing import List, Optional
-import urllib.parse
-import urllib.request
 
 import discord
 from discord import app_commands
@@ -34,17 +29,6 @@ def _format_track_length(length_ms: object) -> str:
     if hours > 0:
         return f"{hours}:{minutes:02d}:{seconds:02d}"
     return f"{minutes}:{seconds:02d}"
-
-
-def _spotify_ready() -> bool:
-    return bool(os.getenv("SPOTIFY_CLIENT_ID", "").strip()) and bool(os.getenv("SPOTIFY_CLIENT_SECRET", "").strip())
-
-
-def _deezer_ready() -> bool:
-    enabled = os.getenv("DEEZER_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
-    has_arl = bool(os.getenv("DEEZER_ARL", "").strip())
-    has_master_key = bool(os.getenv("DEEZER_MASTER_DECRYPTION_KEY", "").strip())
-    return enabled and has_arl and has_master_key
 
 
 class TrackPicker(discord.ui.Select):
@@ -332,18 +316,12 @@ class MusicCog(commands.Cog):
                 normalized = normalized[len("scsearch:") :].strip()
                 requested_source = getattr(source_enum, "SoundCloud", None)
                 explicit_source = True
-            elif lowered.startswith("spsearch:"):
-                normalized = normalized[len("spsearch:") :].strip()
-                requested_source = "spsearch"
-                explicit_source = True
         if not normalized:
             return None, []
         attempts: list[tuple[str, object | None]] = []
-        spotify_ready = _spotify_ready()
         youtube_source = getattr(source_enum, "YouTube", None)
         youtube_music_source = getattr(source_enum, "YouTubeMusic", None)
         soundcloud_source = getattr(source_enum, "SoundCloud", None)
-        deezer_source = getattr(source_enum, "Deezer", None)
 
         def _append_attempt(search_query: str, search_source: object | None) -> None:
             candidate = (search_query, search_source)
@@ -353,61 +331,27 @@ class MusicCog(commands.Cog):
         if is_url:
             _append_attempt(normalized, None)
         elif explicit_source:
-            if requested_source != "spsearch" or spotify_ready:
-                _append_attempt(normalized, requested_source)
-            if requested_source == "spsearch":
-                if deezer_source is not None:
-                    _append_attempt(normalized, deezer_source)
-                else:
-                    _append_attempt(normalized, "dzsearch")
-                if youtube_source is not None:
-                    _append_attempt(normalized, youtube_source)
-                if youtube_music_source is not None:
-                    _append_attempt(normalized, youtube_music_source)
-                if soundcloud_source is not None:
-                    _append_attempt(normalized, soundcloud_source)
-                else:
-                    _append_attempt(normalized, "scsearch")
+            _append_attempt(normalized, requested_source)
         else:
             selected = preferred_source.strip().lower()
-            if selected == "spotify":
-                if spotify_ready:
-                    _append_attempt(normalized, "spsearch")
-                if deezer_source is not None:
-                    _append_attempt(normalized, deezer_source)
+            if selected == "soundcloud":
+                if soundcloud_source is not None:
+                    _append_attempt(normalized, soundcloud_source)
                 else:
-                    _append_attempt(normalized, "dzsearch")
+                    _append_attempt(normalized, "scsearch")
                 if youtube_source is not None:
                     _append_attempt(normalized, youtube_source)
                 if youtube_music_source is not None:
                     _append_attempt(normalized, youtube_music_source)
-                if soundcloud_source is not None:
-                    _append_attempt(normalized, soundcloud_source)
-                else:
-                    _append_attempt(normalized, "scsearch")
-            elif selected == "deezer":
-                if deezer_source is not None:
-                    _append_attempt(normalized, deezer_source)
-                else:
-                    _append_attempt(normalized, "dzsearch")
-                if youtube_source is not None:
-                    _append_attempt(normalized, youtube_source)
-                if youtube_music_source is not None:
-                    _append_attempt(normalized, youtube_music_source)
-                if soundcloud_source is not None:
-                    _append_attempt(normalized, soundcloud_source)
-                else:
-                    _append_attempt(normalized, "scsearch")
-            elif selected == "soundcloud":
-                if soundcloud_source is not None:
-                    _append_attempt(normalized, soundcloud_source)
-                else:
-                    _append_attempt(normalized, "scsearch")
             else:
                 if youtube_source is not None:
                     _append_attempt(normalized, youtube_source)
                 if youtube_music_source is not None:
                     _append_attempt(normalized, youtube_music_source)
+                if soundcloud_source is not None:
+                    _append_attempt(normalized, soundcloud_source)
+                else:
+                    _append_attempt(normalized, "scsearch")
                 if not attempts:
                     _append_attempt(normalized, None)
         last_error: Optional[Exception] = None
@@ -457,28 +401,6 @@ class MusicCog(commands.Cog):
         lowered = query.strip().lower()
         return lowered.startswith("http://") or lowered.startswith("https://")
 
-    def _is_spotify_query(self, query: str) -> bool:
-        lowered = query.strip().lower()
-        return "open.spotify.com/" in lowered or "spotify.link/" in lowered
-
-    async def _spotify_oembed_query(self, url: str) -> Optional[str]:
-        def _fetch_oembed() -> Optional[str]:
-            endpoint = "https://open.spotify.com/oembed?" + urllib.parse.urlencode({"url": url})
-            request = urllib.request.Request(endpoint, headers={"User-Agent": "Mozilla/5.0"})
-            try:
-                with urllib.request.urlopen(request, timeout=8) as response:
-                    if response.status != 200:
-                        return None
-                    payload = json.loads(response.read().decode("utf-8", errors="ignore"))
-            except Exception:
-                return None
-            title = str(payload.get("title") or "").strip()
-            author = str(payload.get("author_name") or "").strip()
-            search_query = f"{title} {author}".strip()
-            return search_query or None
-
-        return await asyncio.to_thread(_fetch_oembed)
-
     async def _play_internal(
         self,
         interaction: discord.Interaction,
@@ -513,57 +435,10 @@ class MusicCog(commands.Cog):
             await interaction.followup.send("Failed to connect to voice.")
             return
         await self._maybe_warn_low_bitrate(interaction, player.channel if isinstance(player, wavelink.Player) else None)
-        normalized_source = preferred_source.strip().lower()
-        spotify_ready = _spotify_ready()
-        deezer_ready = _deezer_ready()
-        spotify_link = self._is_spotify_query(query)
-        spotify_fallback = False
-        effective_source = preferred_source
-        effective_query = query
-        if normalized_source == "spotify" and not spotify_ready:
-            spotify_fallback = True
-            effective_source = "deezer" if deezer_ready else "youtube"
-        if spotify_link and not spotify_ready:
-            spotify_fallback = True
-            oembed_query = await self._spotify_oembed_query(query)
-            if oembed_query:
-                effective_query = oembed_query
-                if normalized_source != "spotify":
-                    effective_source = preferred_source
-        playlist, tracks = await self._search(effective_query, preferred_source=effective_source)
+        playlist, tracks = await self._search(query, preferred_source=preferred_source)
         if not tracks:
-            if spotify_fallback and spotify_link and effective_query == query:
-                await interaction.followup.send(
-                    (
-                        "Spotify link could not be resolved without credentials. Set SPOTIFY_CLIENT_ID and "
-                        "SPOTIFY_CLIENT_SECRET in Lavalink, then restart Lavalink."
-                    ),
-                    ephemeral=True,
-                )
-                return
-            if spotify_fallback:
-                await interaction.followup.send(
-                    (
-                        "Spotify credentials are missing. Auto fallback search also found no results. "
-                        "Add Spotify credentials for full Spotify support."
-                    ),
-                    ephemeral=True,
-                )
-                return
             await interaction.followup.send("No results found.", ephemeral=True)
             return
-        if spotify_fallback:
-            fallback_source = "Deezer" if effective_source.strip().lower() == "deezer" else "YouTube/SoundCloud"
-            if spotify_link and effective_query != query:
-                await interaction.followup.send(
-                    f"Spotify credentials are missing. Converted link to search and used {fallback_source} fallback.",
-                    ephemeral=True,
-                )
-            else:
-                await interaction.followup.send(
-                    f"Spotify credentials are missing. Using {fallback_source} fallback.",
-                    ephemeral=True,
-                )
         available = MUSIC_MAX_QUEUE - self._queue_size(player)
         if available <= 0:
             await interaction.followup.send("Queue is full.", ephemeral=True)
@@ -656,7 +531,6 @@ class MusicCog(commands.Cog):
     @app_commands.choices(
         source=[
             app_commands.Choice(name="Youtube", value="youtube"),
-            app_commands.Choice(name="Spotify", value="spotify"),
             app_commands.Choice(name="Soundcloud", value="soundcloud"),
         ]
     )
