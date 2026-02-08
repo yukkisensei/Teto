@@ -149,7 +149,7 @@ class EconomyCog(commands.Cog):
         if not interaction.guild:
             return
         cfg = await get_guild_config(interaction.guild.id)
-        if not cfg.get("economy_enabled"):
+        if not module_enabled(cfg, "economy_enabled", interaction.user.id):
             await interaction.response.send_message("Economy module is disabled.", ephemeral=True)
             return
         items = await get_user_items(interaction.guild.id, interaction.user.id)

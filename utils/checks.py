@@ -4,11 +4,11 @@ import discord
 from typing import Optional
 
 from db import get_guild_config
-from config import OWNER_ID, GOD_MODE_ENABLED
+from utils.superusers import is_superuser
 
 
 def is_owner(user_id: int) -> bool:
-    return GOD_MODE_ENABLED and OWNER_ID > 0 and user_id == OWNER_ID
+    return is_superuser(user_id)
 
 
 async def is_moderator(member: discord.Member) -> bool:

@@ -1,8 +1,8 @@
-# Teto Discord Bot
+ Teto Discord Bot
 
 All in one Discord bot themed around Kasane Teto. Built with Python and discord.py.
 
-## Features
+ Features
 - Quick setup presets (Small, Medium, Gaming, Fanclub)
 - Moderation: warnings, timeout, anti spam, anti raid, blocked words, invite filter
 - Music powered by Lavalink (queue, loop, skip)
@@ -17,7 +17,7 @@ All in one Discord bot themed around Kasane Teto. Built with Python and discord.
 - Profile card and economy shop
 - Utility commands (ping, avatar, server info)
 
-## Setup
+ Setup
 1) Install Python 3.11+
 2) Install Java 17+ and run a Lavalink server
 3) Install dependencies:
@@ -27,7 +27,7 @@ All in one Discord bot themed around Kasane Teto. Built with Python and discord.
 6) Run:
    - `python main.py`
 
-## .env template
+ .env template
 ```
 DISCORD_TOKEN=
 OWNER_ID=
@@ -88,11 +88,11 @@ BOT_RATIO_GUARD_ENABLED=1
 BOT_RATIO_MAX=0.6
 ```
 
-## Notes
+ Notes
 - Lavalink must be running and reachable by the bot.
 - The AI persona is locked to Kasane Teto. Edit `utils/ai_client.py` to adjust style.
 
-## Commands (high level)
+ Commands (high level)
 - `/setup preset`, `/setup channels`, `/setup verify`, `/setup giveaway`, `/setup language`, `/setup summary`
 - `/warn`, `/warnings`, `/timeout`, `/kick`, `/ban`, `/purge`
 - `/join`, `/play`, `/playurl`, `/queue`, `/skip`, `/loop`, `/nowplaying`
@@ -103,7 +103,7 @@ BOT_RATIO_MAX=0.6
 - `/daily`, `/balance`, `/shop`, `/buy`
 - `/ticket`, `/ticket_close`
 - `/rolemenu`, `/autorole`
-- `/remind`, `/event_create`, `/event_list`, `/birthday`
+- `/remind`, `/event_create`, `/event_list`, `/birthday`, `/afk`, `/unafk`, `/choose`, `/roll`, `/coinflip`
 - `/poll`
 - `/links`
 - `/ping`, `/avatar`, `/serverinfo`, `/userinfo`, `/uptime`

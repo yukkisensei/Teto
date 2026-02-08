@@ -3,11 +3,11 @@ from __future__ import annotations
 import discord
 from typing import Any, Dict, Optional
 
-from config import OWNER_ID, GOD_MODE_ENABLED
+from utils.superusers import is_superuser
 
 
 def is_owner(user_id: int | None) -> bool:
-    return bool(GOD_MODE_ENABLED and OWNER_ID and user_id == OWNER_ID)
+    return is_superuser(user_id)
 
 
 def bot_ratio_exceeded(guild: discord.Guild, config: Dict[str, Any], user_id: Optional[int] = None) -> bool:

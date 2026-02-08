@@ -19,7 +19,7 @@ from db import (
     remove_blocked_word,
     list_blocked_words,
 )
-from utils.guards import bot_ratio_exceeded
+from utils.guards import bot_ratio_exceeded, is_owner
 from utils.checks import is_moderator
 from utils.logging_utils import send_log
 
@@ -51,11 +51,18 @@ class ModerationCog(commands.Cog):
         except Exception:
             pass
 
+    async def _send_log_if_visible(self, guild_id: int, actor_id: int | None, content: str) -> None:
+        if is_owner(actor_id):
+            return
+        await send_log(self.bot, guild_id, content=content)
+
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member) -> None:
+        if is_owner(member.id):
+            return
         cfg = await get_guild_config(member.guild.id)
         if bot_ratio_exceeded(member.guild, cfg):
-            await send_log(self.bot, member.guild.id, content="Bot ratio guard: bots exceed humans.")
+            await self._send_log_if_visible(member.guild.id, member.id, "Bot ratio guard: bots exceed humans.")
         if not cfg.get("anti_raid_enabled"):
             return
         now = datetime.now(timezone.utc).timestamp()
@@ -67,17 +74,21 @@ class ModerationCog(commands.Cog):
             bucket.popleft()
         if len(bucket) >= threshold:
             await self._timeout_member(member, 10, "Anti-raid protection")
-            await send_log(self.bot, member.guild.id, content=f"Anti-raid: timed out {member.mention}")
+            await self._send_log_if_visible(member.guild.id, member.id, f"Anti-raid: timed out {member.mention}")
 
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member) -> None:
+        if is_owner(member.id):
+            return
         cfg = await get_guild_config(member.guild.id)
         if bot_ratio_exceeded(member.guild, cfg):
-            await send_log(self.bot, member.guild.id, content="Bot ratio guard: bots exceed humans.")
+            await self._send_log_if_visible(member.guild.id, member.id, "Bot ratio guard: bots exceed humans.")
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message) -> None:
         if not message.guild or message.author.bot:
+            return
+        if is_owner(message.author.id):
             return
         cfg = await get_guild_config(message.guild.id)
         if (
@@ -177,7 +188,7 @@ class ModerationCog(commands.Cog):
         reason = reason or "No reason provided."
         await add_warning(interaction.guild.id, member.id, interaction.user.id, reason)
         await interaction.response.send_message(f"Warned {member.mention}: {reason}", ephemeral=True)
-        await send_log(self.bot, interaction.guild.id, content=f"Warn: {member} by {interaction.user} - {reason}")
+        await self._send_log_if_visible(interaction.guild.id, interaction.user.id, f"Warn: {member} by {interaction.user} - {reason}")
 
     @app_commands.command(name="warnings", description="Show a user's warnings.")
     async def warnings(self, interaction: discord.Interaction, member: discord.Member) -> None:
@@ -196,7 +207,7 @@ class ModerationCog(commands.Cog):
             return
         await clear_warnings(interaction.guild.id, member.id)
         await interaction.response.send_message(f"Warnings cleared for {member.mention}.", ephemeral=True)
-        await send_log(self.bot, interaction.guild.id, content=f"Warnings cleared for {member} by {interaction.user}")
+        await self._send_log_if_visible(interaction.guild.id, interaction.user.id, f"Warnings cleared for {member} by {interaction.user}")
 
     @app_commands.command(name="timeout", description="Timeout a user.")
     async def timeout(self, interaction: discord.Interaction, member: discord.Member, minutes: int, reason: Optional[str] = None) -> None:
@@ -204,7 +215,7 @@ class ModerationCog(commands.Cog):
             return
         await self._timeout_member(member, minutes, reason or "Timeout")
         await interaction.response.send_message(f"Timed out {member.mention} for {minutes} minutes.", ephemeral=True)
-        await send_log(self.bot, interaction.guild.id, content=f"Timeout: {member} by {interaction.user} for {minutes}m")
+        await self._send_log_if_visible(interaction.guild.id, interaction.user.id, f"Timeout: {member} by {interaction.user} for {minutes}m")
 
     @app_commands.command(name="kick", description="Kick a user.")
     async def kick(self, interaction: discord.Interaction, member: discord.Member, reason: Optional[str] = None) -> None:
@@ -216,7 +227,7 @@ class ModerationCog(commands.Cog):
             await interaction.response.send_message("Failed to kick user.", ephemeral=True)
             return
         await interaction.response.send_message(f"Kicked {member.mention}.", ephemeral=True)
-        await send_log(self.bot, interaction.guild.id, content=f"Kick: {member} by {interaction.user}")
+        await self._send_log_if_visible(interaction.guild.id, interaction.user.id, f"Kick: {member} by {interaction.user}")
 
     @app_commands.command(name="ban", description="Ban a user.")
     async def ban(self, interaction: discord.Interaction, member: discord.Member, reason: Optional[str] = None) -> None:
@@ -228,7 +239,7 @@ class ModerationCog(commands.Cog):
             await interaction.response.send_message("Failed to ban user.", ephemeral=True)
             return
         await interaction.response.send_message(f"Banned {member.mention}.", ephemeral=True)
-        await send_log(self.bot, interaction.guild.id, content=f"Ban: {member} by {interaction.user}")
+        await self._send_log_if_visible(interaction.guild.id, interaction.user.id, f"Ban: {member} by {interaction.user}")
 
     @app_commands.command(name="unban", description="Unban a user by ID.")
     async def unban(self, interaction: discord.Interaction, user_id: str) -> None:
@@ -241,7 +252,7 @@ class ModerationCog(commands.Cog):
             await interaction.response.send_message("Failed to unban user.", ephemeral=True)
             return
         await interaction.response.send_message(f"Unbanned {user_id}.", ephemeral=True)
-        await send_log(self.bot, interaction.guild.id, content=f"Unban: {user_id} by {interaction.user}")
+        await self._send_log_if_visible(interaction.guild.id, interaction.user.id, f"Unban: {user_id} by {interaction.user}")
 
     @app_commands.command(name="purge", description="Purge messages.")
     async def purge(self, interaction: discord.Interaction, amount: int) -> None:
@@ -252,7 +263,7 @@ class ModerationCog(commands.Cog):
         await interaction.response.defer(thinking=True, ephemeral=True)
         deleted = await interaction.channel.purge(limit=min(amount, 100))
         await interaction.followup.send(f"Deleted {len(deleted)} messages.", ephemeral=True)
-        await send_log(self.bot, interaction.guild.id, content=f"Purge: {len(deleted)} messages by {interaction.user}")
+        await self._send_log_if_visible(interaction.guild.id, interaction.user.id, f"Purge: {len(deleted)} messages by {interaction.user}")
 
     @app_commands.command(name="filter_add", description="Add a blocked word.")
     async def filter_add(self, interaction: discord.Interaction, word: str) -> None:

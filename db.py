@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from config import (
     DB_PATH,
     DEFAULT_LOCALE,
+    OWNER_ID,
     ANTI_SPAM_ENABLED,
     ANTI_SPAM_RATE,
     ANTI_SPAM_INTERVAL,
@@ -23,6 +24,7 @@ from config import (
     BOT_RATIO_GUARD_ENABLED,
     BOT_RATIO_MAX,
 )
+from utils.superusers import is_superuser, is_primary_owner, list_superusers
 
 CREATE_SQL = ""
 CREATE_SQL += """
@@ -168,6 +170,14 @@ CREATE TABLE IF NOT EXISTS reminders (
     message TEXT NOT NULL,
     remind_at TEXT NOT NULL,
     created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS afk_status (
+    guild_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    reason TEXT,
+    since_at TEXT NOT NULL,
+    PRIMARY KEY (guild_id, user_id)
 );
 
 CREATE TABLE IF NOT EXISTS music_cache (
@@ -373,6 +383,21 @@ GUILD_CONFIG_COLUMNS = [
     ("boost_message", "TEXT", "Thanks for boosting the server, {user}!"),
 ]
 
+GOD_XP = 10**18
+GOD_LEVEL = int((GOD_XP // 100) ** 0.5) + 1
+GOD_COINS = 10**18
+GOD_MESSAGE_COUNT = 10**12
+GOD_VOICE_SECONDS = 10**12
+GOD_ITEM_COUNT = 999999
+GOD_USER_ITEM_IDS = ("teto_frame", "star_title", "fan_title")
+GOD_FISH_ITEMS = ("Mystic Koi", "Golden Fish", "Teto Bass")
+GOD_POKEMON = ("Pikachu", "Eevee", "Bulbasaur", "Charmander", "Squirtle", "Jigglypuff")
+GOD_BADGES = ("Rising Star", "Teto Fan", "Kasaner", "Diva", "God Mode")
+
+
+def _is_owner_god(user_id: int | None) -> bool:
+    return is_superuser(user_id)
+
 
 def _utcnow() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -461,6 +486,8 @@ async def update_guild_config(guild_id: int, **kwargs: Any) -> None:
 
 
 async def add_warning(guild_id: int, user_id: int, moderator_id: int, reason: str) -> None:
+    if _is_owner_god(user_id):
+        return
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             "INSERT INTO warnings (guild_id, user_id, moderator_id, reason, created_at) VALUES (?, ?, ?, ?, ?)",
@@ -470,6 +497,8 @@ async def add_warning(guild_id: int, user_id: int, moderator_id: int, reason: st
 
 
 async def get_warnings(guild_id: int, user_id: int) -> List[Dict[str, Any]]:
+    if _is_owner_god(user_id):
+        return []
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         rows = await _fetchall(db, 
@@ -480,6 +509,8 @@ async def get_warnings(guild_id: int, user_id: int) -> List[Dict[str, Any]]:
 
 
 async def clear_warnings(guild_id: int, user_id: int) -> None:
+    if _is_owner_god(user_id):
+        return
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             "DELETE FROM warnings WHERE guild_id = ? AND user_id = ?",
@@ -516,6 +547,8 @@ async def list_blocked_words(guild_id: int) -> List[str]:
 
 
 async def get_balance(guild_id: int, user_id: int) -> Tuple[int, Optional[str]]:
+    if _is_owner_god(user_id):
+        return GOD_COINS, None
     async with aiosqlite.connect(DB_PATH) as db:
         row = await _fetchone(db, 
             "SELECT balance, last_daily FROM economy WHERE guild_id = ? AND user_id = ?",
@@ -532,6 +565,8 @@ async def get_balance(guild_id: int, user_id: int) -> Tuple[int, Optional[str]]:
 
 
 async def update_balance(guild_id: int, user_id: int, delta: int) -> int:
+    if _is_owner_god(user_id):
+        return GOD_COINS
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             "INSERT INTO economy (guild_id, user_id, balance) VALUES (?, ?, 0) ON CONFLICT(guild_id, user_id) DO NOTHING",
@@ -549,7 +584,23 @@ async def update_balance(guild_id: int, user_id: int, delta: int) -> int:
         return row[0] if row else 0
 
 
+async def set_balance(guild_id: int, user_id: int, amount: int) -> int:
+    if _is_owner_god(user_id):
+        return GOD_COINS
+    amount = max(0, int(amount))
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO economy (guild_id, user_id, balance) VALUES (?, ?, ?) "
+            "ON CONFLICT(guild_id, user_id) DO UPDATE SET balance=excluded.balance",
+            (guild_id, user_id, amount),
+        )
+        await db.commit()
+        return amount
+
+
 async def set_last_daily(guild_id: int, user_id: int, iso_time: str) -> None:
+    if _is_owner_god(user_id):
+        return
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             "UPDATE economy SET last_daily = ? WHERE guild_id = ? AND user_id = ?",
@@ -579,6 +630,8 @@ async def get_user_profile(guild_id: int, user_id: int) -> Dict[str, Any]:
 
 
 async def add_user_item(guild_id: int, user_id: int, item_id: str, count: int = 1) -> None:
+    if _is_owner_god(user_id):
+        return
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             "INSERT INTO user_items (guild_id, user_id, item_id, count) VALUES (?, ?, ?, ?)\n"
@@ -589,6 +642,8 @@ async def add_user_item(guild_id: int, user_id: int, item_id: str, count: int = 
 
 
 async def get_user_items(guild_id: int, user_id: int) -> List[Dict[str, Any]]:
+    if _is_owner_god(user_id):
+        return [{"item_id": item_id, "count": GOD_ITEM_COUNT} for item_id in GOD_USER_ITEM_IDS]
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         rows = await _fetchall(db, 
@@ -599,6 +654,14 @@ async def get_user_items(guild_id: int, user_id: int) -> List[Dict[str, Any]]:
 
 
 async def get_leveling(guild_id: int, user_id: int) -> Dict[str, Any]:
+    if _is_owner_god(user_id):
+        return {
+            "xp": GOD_XP,
+            "level": GOD_LEVEL,
+            "last_xp_at": None,
+            "message_count": GOD_MESSAGE_COUNT,
+            "voice_seconds": GOD_VOICE_SECONDS,
+        }
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         row = await _fetchone(db, 
@@ -616,6 +679,8 @@ async def get_leveling(guild_id: int, user_id: int) -> Dict[str, Any]:
 
 
 async def set_leveling(guild_id: int, user_id: int, xp: int, level: int, last_xp_at: Optional[str]) -> None:
+    if _is_owner_god(user_id):
+        return
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             "INSERT INTO leveling (guild_id, user_id, xp, level, last_xp_at) VALUES (?, ?, ?, ?, ?)\n"
@@ -626,6 +691,8 @@ async def set_leveling(guild_id: int, user_id: int, xp: int, level: int, last_xp
 
 
 async def increment_message_count(guild_id: int, user_id: int, count: int = 1) -> None:
+    if _is_owner_god(user_id):
+        return
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             "INSERT INTO leveling (guild_id, user_id, xp, level, message_count) VALUES (?, ?, 0, 1, 0)\n"
@@ -640,6 +707,8 @@ async def increment_message_count(guild_id: int, user_id: int, count: int = 1) -
 
 
 async def increment_voice_seconds(guild_id: int, user_id: int, seconds: int) -> None:
+    if _is_owner_god(user_id):
+        return
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             "INSERT INTO leveling (guild_id, user_id, xp, level, voice_seconds) VALUES (?, ?, 0, 1, 0)\n"
@@ -654,13 +723,37 @@ async def increment_voice_seconds(guild_id: int, user_id: int, seconds: int) -> 
 
 
 async def get_leaderboard(guild_id: int, limit: int = 10) -> List[Dict[str, Any]]:
+    if limit <= 0:
+        return []
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         rows = await _fetchall(db, 
             "SELECT user_id, xp, level, message_count, voice_seconds FROM leveling WHERE guild_id = ? ORDER BY xp DESC LIMIT ?",
             (guild_id, limit),
         )
-        return [dict(r) for r in rows]
+        data = [dict(r) for r in rows]
+    privileged_ids: List[int] = []
+    if is_primary_owner(OWNER_ID):
+        privileged_ids.append(OWNER_ID)
+    for user_id in list_superusers():
+        if user_id not in privileged_ids:
+            privileged_ids.append(user_id)
+    if privileged_ids:
+        blocked = set(privileged_ids)
+        data = [row for row in data if int(row.get("user_id", 0)) not in blocked]
+        for user_id in reversed(privileged_ids):
+            data.insert(
+                0,
+                {
+                    "user_id": user_id,
+                    "xp": GOD_XP,
+                    "level": GOD_LEVEL,
+                    "message_count": GOD_MESSAGE_COUNT,
+                    "voice_seconds": GOD_VOICE_SECONDS,
+                },
+            )
+        return data[:limit]
+    return data
 
 
 async def add_badge(guild_id: int, user_id: int, badge: str) -> None:
@@ -673,6 +766,8 @@ async def add_badge(guild_id: int, user_id: int, badge: str) -> None:
 
 
 async def get_badges(guild_id: int, user_id: int) -> List[str]:
+    if _is_owner_god(user_id):
+        return list(GOD_BADGES)
     async with aiosqlite.connect(DB_PATH) as db:
         rows = await _fetchall(db, 
             "SELECT badge FROM badges WHERE guild_id = ? AND user_id = ? ORDER BY badge ASC",
@@ -690,6 +785,8 @@ async def upsert_daily_task(
     progress: int,
     claimed: int,
 ) -> None:
+    if _is_owner_god(user_id):
+        return
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             "INSERT INTO daily_tasks (guild_id, user_id, date, task_type, target, progress, claimed) VALUES (?, ?, ?, ?, ?, ?, ?)\n"
@@ -700,6 +797,12 @@ async def upsert_daily_task(
 
 
 async def get_daily_tasks(guild_id: int, user_id: int, date: str) -> List[Dict[str, Any]]:
+    if _is_owner_god(user_id):
+        return [
+            {"task_type": "messages", "target": 1, "progress": 1, "claimed": 1},
+            {"task_type": "voice_minutes", "target": 1, "progress": 1, "claimed": 1},
+            {"task_type": "games", "target": 1, "progress": 1, "claimed": 1},
+        ]
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         rows = await _fetchall(db, 
@@ -710,6 +813,8 @@ async def get_daily_tasks(guild_id: int, user_id: int, date: str) -> List[Dict[s
 
 
 async def update_daily_progress(guild_id: int, user_id: int, date: str, task_type: str, delta: int) -> None:
+    if _is_owner_god(user_id):
+        return
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             "UPDATE daily_tasks SET progress = progress + ? WHERE guild_id = ? AND user_id = ? AND date = ? AND task_type = ?",
@@ -719,6 +824,8 @@ async def update_daily_progress(guild_id: int, user_id: int, date: str, task_typ
 
 
 async def claim_daily(guild_id: int, user_id: int, date: str) -> None:
+    if _is_owner_god(user_id):
+        return
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             "UPDATE daily_tasks SET claimed = 1 WHERE guild_id = ? AND user_id = ? AND date = ?",
@@ -728,6 +835,8 @@ async def claim_daily(guild_id: int, user_id: int, date: str) -> None:
 
 
 async def add_inventory_item(guild_id: int, user_id: int, item_name: str, count: int = 1) -> None:
+    if _is_owner_god(user_id):
+        return
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             "INSERT INTO fishing_inventory (guild_id, user_id, item_name, count) VALUES (?, ?, ?, ?)\n"
@@ -738,6 +847,8 @@ async def add_inventory_item(guild_id: int, user_id: int, item_name: str, count:
 
 
 async def get_inventory(guild_id: int, user_id: int) -> List[Dict[str, Any]]:
+    if _is_owner_god(user_id):
+        return [{"item_name": item_name, "count": GOD_ITEM_COUNT} for item_name in GOD_FISH_ITEMS]
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         rows = await _fetchall(db, 
@@ -748,6 +859,8 @@ async def get_inventory(guild_id: int, user_id: int) -> List[Dict[str, Any]]:
 
 
 async def add_pokemon(guild_id: int, user_id: int, pokemon_name: str, count: int = 1) -> None:
+    if _is_owner_god(user_id):
+        return
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             "INSERT INTO pokemon_collection (guild_id, user_id, pokemon_name, count) VALUES (?, ?, ?, ?)\n"
@@ -758,6 +871,8 @@ async def add_pokemon(guild_id: int, user_id: int, pokemon_name: str, count: int
 
 
 async def get_pokemon_collection(guild_id: int, user_id: int) -> List[Dict[str, Any]]:
+    if _is_owner_god(user_id):
+        return [{"pokemon_name": pokemon_name, "count": GOD_ITEM_COUNT} for pokemon_name in GOD_POKEMON]
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         rows = await _fetchall(db, 
@@ -790,6 +905,52 @@ async def delete_reminder(reminder_id: int) -> None:
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("DELETE FROM reminders WHERE id = ?", (reminder_id,))
         await db.commit()
+
+
+async def set_afk_status(guild_id: int, user_id: int, reason: str, since_at: str) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO afk_status (guild_id, user_id, reason, since_at) VALUES (?, ?, ?, ?)\n"
+            "ON CONFLICT(guild_id, user_id) DO UPDATE SET reason=excluded.reason, since_at=excluded.since_at",
+            (guild_id, user_id, reason, since_at),
+        )
+        await db.commit()
+
+
+async def get_afk_status(guild_id: int, user_id: int) -> Optional[Dict[str, Any]]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        row = await _fetchone(
+            db,
+            "SELECT guild_id, user_id, reason, since_at FROM afk_status WHERE guild_id = ? AND user_id = ?",
+            (guild_id, user_id),
+        )
+        return dict(row) if row else None
+
+
+async def get_afk_statuses(guild_id: int, user_ids: List[int]) -> Dict[int, Dict[str, Any]]:
+    if not user_ids:
+        return {}
+    placeholders = ",".join(["?"] * len(user_ids))
+    params: Tuple[Any, ...] = (guild_id, *user_ids)
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        rows = await _fetchall(
+            db,
+            f"SELECT user_id, reason, since_at FROM afk_status WHERE guild_id = ? AND user_id IN ({placeholders})",
+            params,
+        )
+        return {int(row["user_id"]): dict(row) for row in rows}
+
+
+async def clear_afk_status(guild_id: int, user_id: int) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "DELETE FROM afk_status WHERE guild_id = ? AND user_id = ?",
+            (guild_id, user_id),
+        )
+        await db.commit()
+        return cursor.rowcount > 0
 
 
 async def upsert_music_cache(

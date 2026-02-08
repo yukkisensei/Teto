@@ -4,6 +4,7 @@ import discord
 from discord.ext import commands
 
 from db import get_guild_config
+from utils.guards import is_owner
 from utils.logging_utils import send_log
 
 
@@ -13,6 +14,8 @@ class LoggingCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member) -> None:
+        if is_owner(member.id):
+            return
         cfg = await get_guild_config(member.guild.id)
         if not cfg.get("logging_enabled"):
             return
@@ -25,6 +28,8 @@ class LoggingCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member) -> None:
+        if is_owner(member.id):
+            return
         cfg = await get_guild_config(member.guild.id)
         if not cfg.get("logging_enabled"):
             return
@@ -39,6 +44,9 @@ class LoggingCog(commands.Cog):
     async def on_message_delete(self, message: discord.Message) -> None:
         if not message.guild:
             return
+        author = getattr(message, "author", None)
+        if author and is_owner(getattr(author, "id", None)):
+            return
         cfg = await get_guild_config(message.guild.id)
         if not cfg.get("logging_enabled"):
             return
@@ -52,6 +60,8 @@ class LoggingCog(commands.Cog):
     @commands.Cog.listener()
     async def on_message_edit(self, before: discord.Message, after: discord.Message) -> None:
         if not before.guild or before.content == after.content:
+            return
+        if is_owner(getattr(before.author, "id", None)):
             return
         cfg = await get_guild_config(before.guild.id)
         if not cfg.get("logging_enabled"):
@@ -73,6 +83,8 @@ class LoggingCog(commands.Cog):
         after: discord.VoiceState,
     ) -> None:
         if not member.guild:
+            return
+        if is_owner(member.id):
             return
         cfg = await get_guild_config(member.guild.id)
         if not cfg.get("logging_enabled"):

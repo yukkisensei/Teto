@@ -9,21 +9,64 @@ from config import (
     PRESENCE_ACTIVITY_TEXT,
     PRESENCE_STREAM_URL,
     PRESENCE_ROTATION_ENABLED,
-    PRESENCE_ROTATION_INTERVAL,
 )
 
 
-STATUS_MESSAGES = [
-    "Teto is making Baguette....",
-    "Teto is playing with Yuu...",
-    "Teto is Pear!",
-    "Teto is tuning her voicebank.",
-    "Teto is practicing drills.",
-    "Teto is humming UTAU melodies.",
-    "Teto is baking red velvet.",
-    "Teto is chasing a golden note.",
-    "Teto is guarding the twin tails.",
-    "Teto is cheering your server.",
+STATUS_ROTATION_SECONDS = 5
+
+GAME_STATUS_MESSAGES = [
+    "Honkai: Star Rail",
+    "Zenless Zone Zero",
+    "Genshin Impact",
+    "Wuthering Waves",
+    "Arknight: Endfield",
+    "Hatsune Miku: Colorful Stage!",
+    "osu!",
+    "osu!taiko",
+    "osu!mania",
+    "Beat Saber",
+    "Cytus",
+    "Cytus II",
+    "Deemo",
+    "Deemo II",
+    "VOEZ",
+    "Arcaea",
+    "Lanota",
+    "Muse Dash",
+    "Phigros",
+    "Rizline",
+    "Dynamix",
+    "Tone Sphere",
+    "Groove Coaster",
+    "Project DIVA Mega Mix+",
+    "Hatsune Miku: Project DIVA Future Tone",
+    "Hatsune Miku: Project DIVA X",
+    "DJMAX Respect V",
+    "EZ2ON REBOOT : R",
+    "Sound Voltex Exceed Gear",
+    "beatmania IIDX",
+    "pop'n music",
+    "jubeat",
+    "DanceDanceRevolution",
+    "Pump It Up: Phoenix",
+    "maimai DX",
+    "CHUNITHM",
+    "Taiko no Tatsujin",
+    "Rhythm Doctor",
+    "Rhythm Heaven Fever",
+    "Rhythm Heaven Megamix",
+    "A Dance of Fire and Ice",
+    "Spin Rhythm XD",
+    "Trombone Champ",
+    "Melatonin",
+    "Hi-Fi RUSH",
+    "Crypt of the NecroDancer",
+    "BPM: Bullets Per Minute",
+    "Kingdom Hearts: Melody of Memory",
+    "Theatrhythm Final Bar Line",
+    "Superbeat: XONiC",
+    "Pistol Whip",
+    "Sixtar Gate: STARTRAIL",
 ]
 
 
@@ -77,14 +120,14 @@ class PresenceCog(commands.Cog):
         except Exception:
             pass
 
-    @tasks.loop(seconds=PRESENCE_ROTATION_INTERVAL)
+    @tasks.loop(seconds=STATUS_ROTATION_SECONDS)
     async def rotate_status(self) -> None:
         await self.bot.wait_until_ready()
-        message = STATUS_MESSAGES[self._index % len(STATUS_MESSAGES)]
+        message = GAME_STATUS_MESSAGES[self._index % len(GAME_STATUS_MESSAGES)]
         self._index += 1
         status = _status_from_config()
         try:
-            activity = discord.CustomActivity(name=message)
+            activity = discord.Game(name=message)
             await self.bot.change_presence(status=status, activity=activity)
         except Exception:
             try:

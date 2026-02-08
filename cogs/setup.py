@@ -86,6 +86,31 @@ class SetupCog(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
+    def _parse_channel_id(self, raw: str | None) -> int | None:
+        if not raw:
+            return None
+        token = raw.strip()
+        if token.startswith("<") and token.endswith(">"):
+            token = "".join(ch for ch in token[1:-1] if ch.isdigit())
+        if not token.isdigit():
+            return None
+        return int(token)
+
+    async def _resolve_text_channel(self, guild: discord.Guild, raw: str | None) -> discord.TextChannel | None:
+        channel_id = self._parse_channel_id(raw)
+        if channel_id is None:
+            return None
+        channel = guild.get_channel(channel_id)
+        if isinstance(channel, discord.TextChannel):
+            return channel
+        try:
+            fetched = await guild.fetch_channel(channel_id)
+        except Exception:
+            return None
+        if isinstance(fetched, discord.TextChannel):
+            return fetched
+        return None
+
     setup_group = app_commands.Group(name="setup", description="Server setup")
 
     @setup_group.command(name="preset", description="Apply a quick setup preset.")
@@ -123,6 +148,11 @@ class SetupCog(commands.Cog):
         goodbye_channel="Goodbye channel",
         ai_channel="AI channel",
         music_channel="Music channel",
+        log_channel_id="Log channel ID",
+        welcome_channel_id="Welcome channel ID",
+        goodbye_channel_id="Goodbye channel ID",
+        ai_channel_id="AI channel ID",
+        music_channel_id="Music channel ID",
     )
     async def channels(
         self,
@@ -132,6 +162,11 @@ class SetupCog(commands.Cog):
         goodbye_channel: discord.TextChannel | None = None,
         ai_channel: discord.TextChannel | None = None,
         music_channel: discord.TextChannel | None = None,
+        log_channel_id: str | None = None,
+        welcome_channel_id: str | None = None,
+        goodbye_channel_id: str | None = None,
+        ai_channel_id: str | None = None,
+        music_channel_id: str | None = None,
     ) -> None:
         if not interaction.guild or not isinstance(interaction.user, discord.Member):
             return
@@ -140,17 +175,40 @@ class SetupCog(commands.Cog):
         if not await is_moderator(interaction.user):
             await interaction.response.send_message(t(locale, "no_permission"), ephemeral=True)
             return
+        resolved_log_channel = log_channel or await self._resolve_text_channel(interaction.guild, log_channel_id)
+        resolved_welcome_channel = welcome_channel or await self._resolve_text_channel(interaction.guild, welcome_channel_id)
+        resolved_goodbye_channel = goodbye_channel or await self._resolve_text_channel(interaction.guild, goodbye_channel_id)
+        resolved_ai_channel = ai_channel or await self._resolve_text_channel(interaction.guild, ai_channel_id)
+        resolved_music_channel = music_channel or await self._resolve_text_channel(interaction.guild, music_channel_id)
+        invalid_fields: list[str] = []
+        if log_channel_id and log_channel is None and resolved_log_channel is None:
+            invalid_fields.append("log_channel_id")
+        if welcome_channel_id and welcome_channel is None and resolved_welcome_channel is None:
+            invalid_fields.append("welcome_channel_id")
+        if goodbye_channel_id and goodbye_channel is None and resolved_goodbye_channel is None:
+            invalid_fields.append("goodbye_channel_id")
+        if ai_channel_id and ai_channel is None and resolved_ai_channel is None:
+            invalid_fields.append("ai_channel_id")
+        if music_channel_id and music_channel is None and resolved_music_channel is None:
+            invalid_fields.append("music_channel_id")
+        if invalid_fields:
+            details = ", ".join(invalid_fields)
+            await interaction.response.send_message(
+                f"Invalid channel ID in: {details}. Use a valid text channel ID or channel mention.",
+                ephemeral=True,
+            )
+            return
         updates = {}
-        if log_channel:
-            updates["log_channel_id"] = log_channel.id
-        if welcome_channel:
-            updates["welcome_channel_id"] = welcome_channel.id
-        if goodbye_channel:
-            updates["goodbye_channel_id"] = goodbye_channel.id
-        if ai_channel:
-            updates["ai_channel_id"] = ai_channel.id
-        if music_channel:
-            updates["music_channel_id"] = music_channel.id
+        if resolved_log_channel:
+            updates["log_channel_id"] = resolved_log_channel.id
+        if resolved_welcome_channel:
+            updates["welcome_channel_id"] = resolved_welcome_channel.id
+        if resolved_goodbye_channel:
+            updates["goodbye_channel_id"] = resolved_goodbye_channel.id
+        if resolved_ai_channel:
+            updates["ai_channel_id"] = resolved_ai_channel.id
+        if resolved_music_channel:
+            updates["music_channel_id"] = resolved_music_channel.id
         if updates:
             await update_guild_config(interaction.guild.id, **updates)
         await interaction.response.send_message(t(locale, "setup_channels_done"), ephemeral=True)
@@ -213,7 +271,6 @@ class SetupCog(commands.Cog):
     @app_commands.choices(
         language=[
             app_commands.Choice(name="English", value="en"),
-            app_commands.Choice(name="Vietnamese", value="vi"),
         ]
     )
     async def language(self, interaction: discord.Interaction, language: app_commands.Choice[str]) -> None:

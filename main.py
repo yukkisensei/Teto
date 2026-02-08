@@ -16,6 +16,7 @@ from config import (
 )
 from db import init_db
 from utils.ai_client import AIClient
+from utils.guards import is_owner
 
 
 COGS = [
@@ -39,6 +40,7 @@ COGS = [
     "cogs.profile",
     "cogs.encyclopedia",
     "cogs.links",
+    "cogs.owner_admin",
 ]
 
 
@@ -52,7 +54,7 @@ class RateLimitCommandTree(app_commands.CommandTree):
             return True
         if interaction.guild is None:
             try:
-                message = "Bot này chỉ dùng trong server, không nhận lệnh qua DM."
+                message = "This bot can only be used in servers, not in DMs."
                 if not interaction.response.is_done():
                     await interaction.response.send_message(message, ephemeral=True)
                 else:
@@ -63,13 +65,15 @@ class RateLimitCommandTree(app_commands.CommandTree):
         user = interaction.user
         if user is None:
             return True
+        if is_owner(user.id):
+            return True
         now = time.monotonic()
         bucket = self._user_buckets[user.id]
         while bucket and now - bucket[0] > 5.0:
             bucket.popleft()
         if len(bucket) >= 3:
             try:
-                message = "Bạn dùng lệnh nhanh quá (3 lệnh/5s). Chờ chút nhé."
+                message = "You're using commands too quickly (3 commands/5s). Please wait a moment."
                 if not interaction.response.is_done():
                     await interaction.response.send_message(message, ephemeral=True)
                 else:

@@ -14,13 +14,14 @@ DB_PATH = Path(os.getenv("DB_PATH", DATA_DIR / "bot.db"))
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "").strip()
 OWNER_ID = int(os.getenv("OWNER_ID", "0") or "0")
 GOD_MODE_ENABLED = os.getenv("GOD_MODE_ENABLED", "1") == "1"
+BOT_VERSION = os.getenv("BOT_VERSION", "stb-1.1.3").strip()
 
 PRESENCE_STATUS = os.getenv("PRESENCE_STATUS", "dnd").strip().lower()
 PRESENCE_ACTIVITY_TYPE = os.getenv("PRESENCE_ACTIVITY_TYPE", "playing").strip().lower()
 PRESENCE_ACTIVITY_TEXT = os.getenv("PRESENCE_ACTIVITY_TEXT", "Kasane Teto is singing").strip()
 PRESENCE_STREAM_URL = os.getenv("PRESENCE_STREAM_URL", "").strip()
 PRESENCE_ROTATION_ENABLED = os.getenv("PRESENCE_ROTATION_ENABLED", "1") == "1"
-PRESENCE_ROTATION_INTERVAL = int(os.getenv("PRESENCE_ROTATION_INTERVAL", "30"))
+PRESENCE_ROTATION_INTERVAL = int(os.getenv("PRESENCE_ROTATION_INTERVAL", "5"))
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant").strip()

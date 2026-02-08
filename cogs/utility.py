@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
@@ -17,6 +18,10 @@ from db import (
     create_event,
     list_upcoming_events,
     delete_event,
+    set_afk_status,
+    get_afk_status,
+    get_afk_statuses,
+    clear_afk_status,
 )
 from utils.time_utils import parse_duration, format_duration
 from utils.checks import is_moderator
@@ -33,6 +38,13 @@ class UtilityCog(commands.Cog):
     async def cog_unload(self) -> None:
         self.reminder_loop.cancel()
         self.birthday_loop.cancel()
+
+    def _format_afk_since(self, since_at: str) -> str:
+        try:
+            since_dt = datetime.fromisoformat(since_at)
+            return discord.utils.format_dt(since_dt, style="R")
+        except Exception:
+            return "some time ago"
 
     @tasks.loop(seconds=30)
     async def reminder_loop(self) -> None:
@@ -68,6 +80,42 @@ class UtilityCog(commands.Cog):
             users = await list_birthdays_for_date(guild.id, month, day)
             for user_id in users:
                 await channel.send(f"Happy birthday <@{user_id}>! 🎉")
+
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message) -> None:
+        if message.guild is None or message.author.bot:
+            return
+        author_afk = await get_afk_status(message.guild.id, message.author.id)
+        if author_afk:
+            was_cleared = await clear_afk_status(message.guild.id, message.author.id)
+            if was_cleared:
+                reason = author_afk.get("reason") or "AFK"
+                since_text = self._format_afk_since(str(author_afk.get("since_at") or ""))
+                await message.reply(
+                    f"Welcome back, AFK removed. Previous reason: {reason} ({since_text}).",
+                    mention_author=False,
+                    delete_after=20,
+                )
+        if not message.mentions:
+            return
+        mentioned_ids = list({member.id for member in message.mentions if not member.bot and member.id != message.author.id})
+        if not mentioned_ids:
+            return
+        afk_map = await get_afk_statuses(message.guild.id, mentioned_ids)
+        if not afk_map:
+            return
+        lines = []
+        for member in message.mentions:
+            if member.id not in afk_map:
+                continue
+            afk_data = afk_map[member.id]
+            reason = str(afk_data.get("reason") or "AFK")
+            since_text = self._format_afk_since(str(afk_data.get("since_at") or ""))
+            lines.append(f"{member.mention} is AFK: {reason} ({since_text})")
+            if len(lines) >= 5:
+                break
+        if lines:
+            await message.reply("\n".join(lines), mention_author=False, delete_after=20)
 
     @app_commands.command(name="remind", description="Set a reminder (e.g. 10m, 2h, 1d).")
     async def remind(self, interaction: discord.Interaction, duration: str, message: str) -> None:
@@ -148,6 +196,57 @@ class UtilityCog(commands.Cog):
             return
         await delete_event(event_id)
         await interaction.response.send_message("Event deleted.", ephemeral=True)
+
+    @app_commands.command(name="afk", description="Set your AFK status.")
+    async def afk(self, interaction: discord.Interaction, reason: str = "AFK") -> None:
+        if not interaction.guild:
+            return
+        final_reason = reason.strip() or "AFK"
+        if len(final_reason) > 120:
+            await interaction.response.send_message("AFK reason must be 120 characters or fewer.", ephemeral=True)
+            return
+        now_iso = datetime.now(timezone.utc).isoformat()
+        await set_afk_status(interaction.guild.id, interaction.user.id, final_reason, now_iso)
+        await interaction.response.send_message(f"AFK enabled: {final_reason}", ephemeral=True)
+
+    @app_commands.command(name="unafk", description="Disable your AFK status.")
+    async def unafk(self, interaction: discord.Interaction) -> None:
+        if not interaction.guild:
+            return
+        removed = await clear_afk_status(interaction.guild.id, interaction.user.id)
+        if removed:
+            await interaction.response.send_message("AFK disabled.", ephemeral=True)
+            return
+        await interaction.response.send_message("You are not AFK.", ephemeral=True)
+
+    @app_commands.command(name="choose", description="Choose one option from a list separated by |.")
+    async def choose(self, interaction: discord.Interaction, options: str) -> None:
+        items = [item.strip() for item in options.split("|") if item.strip()]
+        if len(items) < 2:
+            await interaction.response.send_message("Provide at least two options separated by |.", ephemeral=True)
+            return
+        picked = random.choice(items)
+        await interaction.response.send_message(f"I choose: {picked}", ephemeral=True)
+
+    @app_commands.command(name="roll", description="Roll dice.")
+    async def roll(
+        self,
+        interaction: discord.Interaction,
+        sides: app_commands.Range[int, 2, 1000] = 6,
+        count: app_commands.Range[int, 1, 20] = 1,
+    ) -> None:
+        results = [random.randint(1, sides) for _ in range(count)]
+        total = sum(results)
+        joined = ", ".join(str(v) for v in results)
+        await interaction.response.send_message(
+            f"Rolled {count}d{sides}: {joined} | Total: {total}",
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="coinflip", description="Flip a coin.")
+    async def coinflip(self, interaction: discord.Interaction) -> None:
+        side = random.choice(["Heads", "Tails"])
+        await interaction.response.send_message(f"Coinflip: {side}", ephemeral=True)
 
 
 async def setup(bot: commands.Bot) -> None:

@@ -23,7 +23,7 @@ from db import (
     update_daily_progress,
 )
 from utils.leveling_utils import level_from_xp, progress_to_next_level
-from utils.guards import bot_ratio_exceeded, module_enabled
+from utils.guards import bot_ratio_exceeded, module_enabled, is_owner
 
 
 def _date_str() -> str:
@@ -67,6 +67,8 @@ class LevelsCog(commands.Cog):
     async def on_message(self, message: discord.Message) -> None:
         if not message.guild or message.author.bot:
             return
+        if is_owner(message.author.id):
+            return
         cfg = await get_guild_config(message.guild.id)
         if not module_enabled(cfg, "leveling_enabled", message.author.id):
             return
@@ -92,6 +94,11 @@ class LevelsCog(commands.Cog):
     @commands.Cog.listener()
     async def on_voice_state_update(self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState) -> None:
         if not member.guild or member.bot:
+            return
+        if is_owner(member.id):
+            guild_sessions = self.voice_sessions.get(member.guild.id)
+            if guild_sessions and member.id in guild_sessions:
+                guild_sessions.pop(member.id, None)
             return
         cfg = await get_guild_config(member.guild.id)
         if not module_enabled(cfg, "leveling_enabled", member.id):

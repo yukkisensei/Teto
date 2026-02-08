@@ -19,22 +19,6 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "ticket_closed": "Ticket closed.",
         "role_menu_created": "Role menu created.",
     },
-    "vi": {
-        "setup_done": "Thiết lập xong.",
-        "setup_channels_done": "Đã cập nhật kênh.",
-        "setup_language_done": "Đã cập nhật ngôn ngữ.",
-        "no_permission": "Bạn không có quyền dùng lệnh này.",
-        "module_disabled": "Module này đang tắt trong server.",
-        "cooldown": "Bạn dùng lệnh quá nhanh, vui lòng thử lại sau.",
-        "ai_not_configured": "AI chưa được cấu hình. Hãy thêm API key.",
-        "music_not_connected": "Tôi chưa vào voice.",
-        "queue_empty": "Danh sách phát đang trống.",
-        "invalid_duration": "Định dạng thời gian không hợp lệ.",
-        "poll_created": "Đã tạo khảo sát.",
-        "ticket_created": "Đã tạo ticket.",
-        "ticket_closed": "Đã đóng ticket.",
-        "role_menu_created": "Đã tạo role menu.",
-    },
 }
 
 

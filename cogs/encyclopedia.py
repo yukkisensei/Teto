@@ -6,6 +6,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from config import BOT_VERSION
+
 
 TETO_INFO = (
     "Kasane Teto is a popular UTAU character known for her red twin-drill hair "
@@ -32,6 +34,7 @@ class EncyclopediaCog(commands.Cog):
     @app_commands.command(name="teto", description="Show info about Kasane Teto.")
     async def teto(self, interaction: discord.Interaction) -> None:
         embed = discord.Embed(title="Kasane Teto", description=TETO_INFO, color=discord.Color.red())
+        embed.set_footer(text=f"version: {BOT_VERSION}")
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @app_commands.command(name="vocaloid", description="Random Vocaloid trivia.")

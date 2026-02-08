@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
+import json
 import logging
+import os
 from typing import List, Optional
+import urllib.parse
+import urllib.request
 
 import discord
 from discord import app_commands
@@ -14,10 +19,94 @@ from db import get_guild_config
 from utils.guards import bot_ratio_exceeded, module_enabled, is_owner
 
 
+def _clamp_text(value: str, size: int = 100) -> str:
+    if len(value) <= size:
+        return value
+    return value[: size - 3] + "..."
+
+
+def _format_track_length(length_ms: object) -> str:
+    if not isinstance(length_ms, int) or length_ms <= 0:
+        return "Live"
+    total_seconds = length_ms // 1000
+    hours, rem = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(rem, 60)
+    if hours > 0:
+        return f"{hours}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes}:{seconds:02d}"
+
+
+def _spotify_ready() -> bool:
+    return bool(os.getenv("SPOTIFY_CLIENT_ID", "").strip()) and bool(os.getenv("SPOTIFY_CLIENT_SECRET", "").strip())
+
+
+def _deezer_ready() -> bool:
+    enabled = os.getenv("DEEZER_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
+    has_arl = bool(os.getenv("DEEZER_ARL", "").strip())
+    has_master_key = bool(os.getenv("DEEZER_MASTER_DECRYPTION_KEY", "").strip())
+    return enabled and has_arl and has_master_key
+
+
+class TrackPicker(discord.ui.Select):
+    def __init__(self, view: "TrackPickerView") -> None:
+        options: list[discord.SelectOption] = []
+        for idx, track in enumerate(view.tracks):
+            title = _clamp_text(getattr(track, "title", "Unknown title"), 100)
+            author = getattr(track, "author", None) or "Unknown artist"
+            length = _format_track_length(getattr(track, "length", None))
+            description = _clamp_text(f"{author} - {length}", 100)
+            options.append(discord.SelectOption(label=title, description=description, value=str(idx)))
+        super().__init__(placeholder="Select a track to play", min_values=1, max_values=1, options=options)
+        self.picker_view = view
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        if self.picker_view.cog._queue_size(self.picker_view.player) >= MUSIC_MAX_QUEUE:
+            await interaction.response.edit_message(content="Queue is full.", view=None)
+            self.picker_view.stop()
+            return
+        index = int(self.values[0])
+        track = self.picker_view.tracks[index]
+        await self.picker_view.cog._queue_track(self.picker_view.player, track)
+        await interaction.response.edit_message(content=f"Queued: {track.title}", view=None)
+        self.picker_view.stop()
+
+
+class TrackPickerView(discord.ui.View):
+    def __init__(
+        self,
+        cog: "MusicCog",
+        player: wavelink.Player,
+        tracks: list[wavelink.Playable],
+        requester_id: int,
+    ) -> None:
+        super().__init__(timeout=45)
+        self.cog = cog
+        self.player = player
+        self.tracks = tracks
+        self.requester_id = requester_id
+        self.message: Optional[discord.Message] = None
+        self.add_item(TrackPicker(self))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.requester_id:
+            return True
+        await interaction.response.send_message("Only the command user can choose a track.", ephemeral=True)
+        return False
+
+    async def on_timeout(self) -> None:
+        if self.message is None:
+            return
+        try:
+            await self.message.edit(content="Selection timed out. Run /play again.", view=None)
+        except Exception:
+            pass
+
+
 class MusicCog(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
         self.loop_enabled: dict[int, bool] = {}
+        self.quality_warning_sent: set[int] = set()
         self.node_ready = False
 
     async def cog_load(self) -> None:
@@ -83,9 +172,20 @@ class MusicCog(commands.Cog):
         getter = getattr(queue, "get", None)
         if getter is None:
             return None
-        result = getter()
+        queue_empty_type = getattr(getattr(wavelink, "exceptions", None), "QueueEmpty", None)
+        try:
+            result = getter()
+        except Exception as exc:
+            if queue_empty_type and isinstance(exc, queue_empty_type):
+                return None
+            return None
         if inspect.isawaitable(result):
-            return await result
+            try:
+                return await result
+            except Exception as exc:
+                if queue_empty_type and isinstance(exc, queue_empty_type):
+                    return None
+                return None
         return result
 
     def _queue_put(self, player: wavelink.Player, track: wavelink.Playable) -> None:
@@ -103,6 +203,59 @@ class MusicCog(commands.Cog):
     async def _maybe_await(self, value: object) -> None:
         if inspect.isawaitable(value):
             await value
+
+    async def _enforce_self_deaf(
+        self,
+        guild: discord.Guild,
+        channel: Optional[discord.abc.Connectable],
+    ) -> None:
+        if channel is None:
+            return
+        changer = getattr(guild, "change_voice_state", None)
+        if changer is None:
+            return
+        try:
+            await changer(channel=channel, self_deaf=True, self_mute=False)
+        except Exception:
+            return
+
+    async def _maybe_warn_low_bitrate(
+        self,
+        interaction: discord.Interaction,
+        channel: Optional[discord.abc.Connectable],
+    ) -> None:
+        if not interaction.guild or channel is None:
+            return
+        guild_id = interaction.guild.id
+        if guild_id in self.quality_warning_sent:
+            return
+        bitrate = getattr(channel, "bitrate", None)
+        if not isinstance(bitrate, int) or bitrate <= 0 or bitrate >= 128000:
+            return
+        self.quality_warning_sent.add(guild_id)
+        kbps = bitrate // 1000
+        try:
+            await interaction.followup.send(
+                (
+                    f"Voice channel bitrate is only {kbps}kbps. Discord always re-encodes to Opus "
+                    "and caps quality by channel bitrate. Use 128kbps+ for cleaner audio."
+                ),
+                ephemeral=True,
+            )
+        except Exception:
+            return
+
+    def _disable_autoplay(self, player: wavelink.Player) -> None:
+        mode_enum = getattr(wavelink, "AutoPlayMode", None)
+        if mode_enum is None:
+            return
+        disabled_value = getattr(mode_enum, "disabled", None)
+        if disabled_value is None:
+            return
+        try:
+            player.autoplay = disabled_value
+        except Exception:
+            pass
 
     def _is_playing(self, player: wavelink.Player) -> bool:
         playing = getattr(player, "playing", None)
@@ -136,32 +289,305 @@ class MusicCog(commands.Cog):
             return None
         existing = interaction.guild.voice_client
         if existing and isinstance(existing, wavelink.Player):
+            self._disable_autoplay(existing)
             if existing.channel != voice_state.channel:
                 mover = getattr(existing, "move_to", None)
                 if mover:
                     await self._maybe_await(mover(voice_state.channel))
+            await self._enforce_self_deaf(interaction.guild, existing.channel or voice_state.channel)
             return existing
-        return await voice_state.channel.connect(cls=wavelink.Player)
+        player = await voice_state.channel.connect(
+            cls=wavelink.Player,
+            self_deaf=True,
+            self_mute=False,
+        )
+        if isinstance(player, wavelink.Player):
+            self._disable_autoplay(player)
+            await self._enforce_self_deaf(interaction.guild, player.channel)
+        return player
 
-    async def _search(self, query: str) -> tuple[Optional[wavelink.Playlist], List[wavelink.Playable]]:
-        try:
-            if hasattr(wavelink, "Playable"):
-                results = await wavelink.Playable.search(query)
-            elif hasattr(wavelink, "YouTubeTrack"):
-                results = await wavelink.YouTubeTrack.search(query=query)
+    async def _search(
+        self,
+        query: str,
+        preferred_source: str = "youtube",
+    ) -> tuple[Optional[wavelink.Playlist], List[wavelink.Playable]]:
+        normalized = query.strip()
+        if not normalized:
+            return None, []
+        is_url = self._is_url_query(normalized)
+        requested_source = None
+        explicit_source = False
+        source_enum = getattr(wavelink, "TrackSource", None)
+        if not is_url:
+            lowered = normalized.lower()
+            if lowered.startswith("ytsearch:"):
+                normalized = normalized[len("ytsearch:") :].strip()
+                requested_source = getattr(source_enum, "YouTube", None)
+                explicit_source = True
+            elif lowered.startswith("ytmsearch:"):
+                normalized = normalized[len("ytmsearch:") :].strip()
+                requested_source = getattr(source_enum, "YouTubeMusic", None)
+                explicit_source = True
+            elif lowered.startswith("scsearch:"):
+                normalized = normalized[len("scsearch:") :].strip()
+                requested_source = getattr(source_enum, "SoundCloud", None)
+                explicit_source = True
+            elif lowered.startswith("spsearch:"):
+                normalized = normalized[len("spsearch:") :].strip()
+                requested_source = "spsearch"
+                explicit_source = True
+        if not normalized:
+            return None, []
+        attempts: list[tuple[str, object | None]] = []
+        spotify_ready = _spotify_ready()
+        youtube_source = getattr(source_enum, "YouTube", None)
+        youtube_music_source = getattr(source_enum, "YouTubeMusic", None)
+        soundcloud_source = getattr(source_enum, "SoundCloud", None)
+        deezer_source = getattr(source_enum, "Deezer", None)
+
+        def _append_attempt(search_query: str, search_source: object | None) -> None:
+            candidate = (search_query, search_source)
+            if candidate not in attempts:
+                attempts.append(candidate)
+
+        if is_url:
+            _append_attempt(normalized, None)
+        elif explicit_source:
+            if requested_source != "spsearch" or spotify_ready:
+                _append_attempt(normalized, requested_source)
+            if requested_source == "spsearch":
+                if deezer_source is not None:
+                    _append_attempt(normalized, deezer_source)
+                else:
+                    _append_attempt(normalized, "dzsearch")
+                if youtube_source is not None:
+                    _append_attempt(normalized, youtube_source)
+                if youtube_music_source is not None:
+                    _append_attempt(normalized, youtube_music_source)
+                if soundcloud_source is not None:
+                    _append_attempt(normalized, soundcloud_source)
+                else:
+                    _append_attempt(normalized, "scsearch")
+        else:
+            selected = preferred_source.strip().lower()
+            if selected == "spotify":
+                if spotify_ready:
+                    _append_attempt(normalized, "spsearch")
+                if deezer_source is not None:
+                    _append_attempt(normalized, deezer_source)
+                else:
+                    _append_attempt(normalized, "dzsearch")
+                if youtube_source is not None:
+                    _append_attempt(normalized, youtube_source)
+                if youtube_music_source is not None:
+                    _append_attempt(normalized, youtube_music_source)
+                if soundcloud_source is not None:
+                    _append_attempt(normalized, soundcloud_source)
+                else:
+                    _append_attempt(normalized, "scsearch")
+            elif selected == "deezer":
+                if deezer_source is not None:
+                    _append_attempt(normalized, deezer_source)
+                else:
+                    _append_attempt(normalized, "dzsearch")
+                if youtube_source is not None:
+                    _append_attempt(normalized, youtube_source)
+                if youtube_music_source is not None:
+                    _append_attempt(normalized, youtube_music_source)
+                if soundcloud_source is not None:
+                    _append_attempt(normalized, soundcloud_source)
+                else:
+                    _append_attempt(normalized, "scsearch")
+            elif selected == "soundcloud":
+                if soundcloud_source is not None:
+                    _append_attempt(normalized, soundcloud_source)
+                else:
+                    _append_attempt(normalized, "scsearch")
             else:
-                results = []
-        except Exception as exc:
-            logging.exception("Search failed: %s", exc)
-            return None, []
-        if hasattr(wavelink, "Playlist") and isinstance(results, wavelink.Playlist):
-            return results, list(results.tracks)
-        if isinstance(results, list):
-            return None, results
-        try:
-            return None, list(results)
-        except Exception:
-            return None, []
+                if youtube_source is not None:
+                    _append_attempt(normalized, youtube_source)
+                if youtube_music_source is not None:
+                    _append_attempt(normalized, youtube_music_source)
+                if not attempts:
+                    _append_attempt(normalized, None)
+        last_error: Optional[Exception] = None
+        for search_query, search_source in attempts:
+            try:
+                if hasattr(wavelink, "Playable"):
+                    if search_source is None:
+                        results = await wavelink.Playable.search(search_query)
+                    else:
+                        results = await wavelink.Playable.search(search_query, source=search_source)
+                elif hasattr(wavelink, "YouTubeTrack"):
+                    results = await wavelink.YouTubeTrack.search(query=search_query)
+                else:
+                    results = []
+            except Exception as exc:
+                last_error = exc
+                continue
+            if hasattr(wavelink, "Playlist") and isinstance(results, wavelink.Playlist):
+                tracks = list(results.tracks)
+                if tracks:
+                    return results, tracks
+                continue
+            if isinstance(results, list):
+                if results:
+                    return None, results
+                continue
+            try:
+                tracks = list(results)
+            except Exception:
+                tracks = []
+            if tracks:
+                return None, tracks
+        if last_error is not None:
+            logging.exception("Search failed: %s", last_error)
+        return None, []
+
+    async def _queue_track(self, player: wavelink.Player, track: wavelink.Playable) -> None:
+        self._disable_autoplay(player)
+        self._queue_put(player, track)
+        if self._is_playing(player):
+            return
+        next_track = await self._queue_get(player)
+        if next_track:
+            await self._maybe_await(player.play(next_track))
+
+    def _is_url_query(self, query: str) -> bool:
+        lowered = query.strip().lower()
+        return lowered.startswith("http://") or lowered.startswith("https://")
+
+    def _is_spotify_query(self, query: str) -> bool:
+        lowered = query.strip().lower()
+        return "open.spotify.com/" in lowered or "spotify.link/" in lowered
+
+    async def _spotify_oembed_query(self, url: str) -> Optional[str]:
+        def _fetch_oembed() -> Optional[str]:
+            endpoint = "https://open.spotify.com/oembed?" + urllib.parse.urlencode({"url": url})
+            request = urllib.request.Request(endpoint, headers={"User-Agent": "Mozilla/5.0"})
+            try:
+                with urllib.request.urlopen(request, timeout=8) as response:
+                    if response.status != 200:
+                        return None
+                    payload = json.loads(response.read().decode("utf-8", errors="ignore"))
+            except Exception:
+                return None
+            title = str(payload.get("title") or "").strip()
+            author = str(payload.get("author_name") or "").strip()
+            search_query = f"{title} {author}".strip()
+            return search_query or None
+
+        return await asyncio.to_thread(_fetch_oembed)
+
+    async def _play_internal(
+        self,
+        interaction: discord.Interaction,
+        query: str,
+        direct_only: bool,
+        preferred_source: str = "youtube",
+    ) -> None:
+        if not interaction.guild or not isinstance(interaction.user, discord.Member):
+            return
+        cfg = await get_guild_config(interaction.guild.id)
+        if not module_enabled(cfg, "music_enabled", interaction.user.id):
+            await interaction.response.send_message("Music module is disabled.", ephemeral=True)
+            return
+        if bot_ratio_exceeded(interaction.guild, cfg, interaction.user.id):
+            await interaction.response.send_message("Music is disabled due to bot ratio guard.", ephemeral=True)
+            return
+        channel_id = cfg.get("music_channel_id")
+        if channel_id and interaction.channel_id != int(channel_id) and not is_owner(interaction.user.id):
+            await interaction.response.send_message("Use the configured music channel.", ephemeral=True)
+            return
+        if not interaction.user.voice or not interaction.user.voice.channel:
+            await interaction.response.send_message("Join a voice channel first.", ephemeral=True)
+            return
+        if not self.node_ready:
+            await self._connect_lavalink()
+        if not self.node_ready:
+            await interaction.response.send_message("Lavalink is not connected.", ephemeral=True)
+            return
+        await interaction.response.defer(thinking=True)
+        player = await self._ensure_player(interaction)
+        if not player:
+            await interaction.followup.send("Failed to connect to voice.")
+            return
+        await self._maybe_warn_low_bitrate(interaction, player.channel if isinstance(player, wavelink.Player) else None)
+        normalized_source = preferred_source.strip().lower()
+        spotify_ready = _spotify_ready()
+        deezer_ready = _deezer_ready()
+        spotify_link = self._is_spotify_query(query)
+        spotify_fallback = False
+        effective_source = preferred_source
+        effective_query = query
+        if normalized_source == "spotify" and not spotify_ready:
+            spotify_fallback = True
+            effective_source = "deezer" if deezer_ready else "youtube"
+        if spotify_link and not spotify_ready:
+            spotify_fallback = True
+            oembed_query = await self._spotify_oembed_query(query)
+            if oembed_query:
+                effective_query = oembed_query
+                if normalized_source != "spotify":
+                    effective_source = preferred_source
+        playlist, tracks = await self._search(effective_query, preferred_source=effective_source)
+        if not tracks:
+            if spotify_fallback and spotify_link and effective_query == query:
+                await interaction.followup.send(
+                    (
+                        "Spotify link could not be resolved without credentials. Set SPOTIFY_CLIENT_ID and "
+                        "SPOTIFY_CLIENT_SECRET in Lavalink, then restart Lavalink."
+                    ),
+                    ephemeral=True,
+                )
+                return
+            if spotify_fallback:
+                await interaction.followup.send(
+                    (
+                        "Spotify credentials are missing. Auto fallback search also found no results. "
+                        "Add Spotify credentials for full Spotify support."
+                    ),
+                    ephemeral=True,
+                )
+                return
+            await interaction.followup.send("No results found.", ephemeral=True)
+            return
+        if spotify_fallback:
+            fallback_source = "Deezer" if effective_source.strip().lower() == "deezer" else "YouTube/SoundCloud"
+            if spotify_link and effective_query != query:
+                await interaction.followup.send(
+                    f"Spotify credentials are missing. Converted link to search and used {fallback_source} fallback.",
+                    ephemeral=True,
+                )
+            else:
+                await interaction.followup.send(
+                    f"Spotify credentials are missing. Using {fallback_source} fallback.",
+                    ephemeral=True,
+                )
+        available = MUSIC_MAX_QUEUE - self._queue_size(player)
+        if available <= 0:
+            await interaction.followup.send("Queue is full.", ephemeral=True)
+            return
+        if playlist:
+            added = 0
+            for track in tracks[:available]:
+                self._queue_put(player, track)
+                added += 1
+            if not self._is_playing(player):
+                next_track = await self._queue_get(player)
+                if next_track:
+                    await self._maybe_await(player.play(next_track))
+            await interaction.followup.send(f"Queued playlist {playlist.name} with {added} tracks.")
+            return
+        if direct_only or self._is_url_query(query):
+            track = tracks[0]
+            await self._queue_track(player, track)
+            await interaction.followup.send(f"Queued: {track.title}")
+            return
+        options = tracks[:5]
+        view = TrackPickerView(self, player, options, interaction.user.id)
+        sent_message = await interaction.followup.send("Top 5 results. Choose one track:", view=view)
+        view.message = sent_message
 
     @commands.Cog.listener()
     async def on_wavelink_track_end(self, payload: object) -> None:
@@ -169,12 +595,31 @@ class MusicCog(commands.Cog):
         track = getattr(payload, "track", None)
         if not isinstance(player, wavelink.Player):
             return
+        self._disable_autoplay(player)
         guild = getattr(player, "guild", None)
         if not guild:
             return
+        reason = str(getattr(payload, "reason", "") or "").lower()
         if self.loop_enabled.get(guild.id) and track is not None:
-            await self._maybe_await(player.play(track))
+            if reason == "loadfailed":
+                self.loop_enabled[guild.id] = False
+            elif reason not in {"stopped", "replaced", "cleanup"}:
+                await self._maybe_await(player.play(track))
+                return
+        next_track = await self._queue_get(player)
+        if next_track is None:
             return
+        await self._maybe_await(player.play(next_track))
+
+    @commands.Cog.listener()
+    async def on_wavelink_track_exception(self, payload: object) -> None:
+        player = getattr(payload, "player", None)
+        if not isinstance(player, wavelink.Player):
+            return
+        self._disable_autoplay(player)
+        guild = getattr(player, "guild", None)
+        if guild and self.loop_enabled.get(guild.id):
+            self.loop_enabled[guild.id] = False
         next_track = await self._queue_get(player)
         if next_track is None:
             return
@@ -207,63 +652,26 @@ class MusicCog(commands.Cog):
         await interaction.followup.send("Joined voice channel.", ephemeral=True)
 
     @app_commands.command(name="play", description="Play music using Lavalink search or URL.")
-    async def play(self, interaction: discord.Interaction, query: str) -> None:
-        if not interaction.guild or not isinstance(interaction.user, discord.Member):
-            return
-        cfg = await get_guild_config(interaction.guild.id)
-        if not module_enabled(cfg, "music_enabled", interaction.user.id):
-            await interaction.response.send_message("Music module is disabled.", ephemeral=True)
-            return
-        if bot_ratio_exceeded(interaction.guild, cfg, interaction.user.id):
-            await interaction.response.send_message("Music is disabled due to bot ratio guard.", ephemeral=True)
-            return
-        channel_id = cfg.get("music_channel_id")
-        if channel_id and interaction.channel_id != int(channel_id) and not is_owner(interaction.user.id):
-            await interaction.response.send_message("Use the configured music channel.", ephemeral=True)
-            return
-        if not interaction.user.voice or not interaction.user.voice.channel:
-            await interaction.response.send_message("Join a voice channel first.", ephemeral=True)
-            return
-        if not self.node_ready:
-            await self._connect_lavalink()
-        if not self.node_ready:
-            await interaction.response.send_message("Lavalink is not connected.", ephemeral=True)
-            return
-        await interaction.response.defer(thinking=True)
-        player = await self._ensure_player(interaction)
-        if not player:
-            await interaction.followup.send("Failed to connect to voice.")
-            return
-        playlist, tracks = await self._search(query)
-        if not tracks:
-            await interaction.followup.send("No results found.", ephemeral=True)
-            return
-        available = MUSIC_MAX_QUEUE - self._queue_size(player)
-        if available <= 0:
-            await interaction.followup.send("Queue is full.", ephemeral=True)
-            return
-        added = 0
-        if playlist:
-            for track in tracks[:available]:
-                self._queue_put(player, track)
-                added += 1
-            if not self._is_playing(player):
-                next_track = await self._queue_get(player)
-                if next_track:
-                    await self._maybe_await(player.play(next_track))
-            await interaction.followup.send(f"Queued playlist {playlist.name} with {added} tracks.")
-            return
-        track = tracks[0]
-        self._queue_put(player, track)
-        if not self._is_playing(player):
-            next_track = await self._queue_get(player)
-            if next_track:
-                await self._maybe_await(player.play(next_track))
-        await interaction.followup.send(f"Queued: {track.title}")
+    @app_commands.describe(source="Search source")
+    @app_commands.choices(
+        source=[
+            app_commands.Choice(name="Youtube", value="youtube"),
+            app_commands.Choice(name="Spotify", value="spotify"),
+            app_commands.Choice(name="Soundcloud", value="soundcloud"),
+        ]
+    )
+    async def play(
+        self,
+        interaction: discord.Interaction,
+        query: str,
+        source: app_commands.Choice[str] | None = None,
+    ) -> None:
+        selected = source.value if source is not None else "youtube"
+        await self._play_internal(interaction, query, direct_only=False, preferred_source=selected)
 
     @app_commands.command(name="playurl", description="Play music from a direct URL.")
     async def playurl(self, interaction: discord.Interaction, url: str) -> None:
-        await self.play(interaction, url)
+        await self._play_internal(interaction, url, direct_only=True)
 
     @app_commands.command(name="skip", description="Skip the current song.")
     async def skip(self, interaction: discord.Interaction) -> None:

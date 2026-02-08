@@ -4,6 +4,7 @@ import discord
 from discord.ext import commands
 
 from db import get_guild_config
+from utils.guards import is_owner
 
 
 class WelcomeCog(commands.Cog):
@@ -12,6 +13,8 @@ class WelcomeCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member) -> None:
+        if is_owner(member.id):
+            return
         cfg = await get_guild_config(member.guild.id)
         if not cfg.get("welcome_enabled"):
             return
@@ -37,6 +40,8 @@ class WelcomeCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member) -> None:
+        if is_owner(member.id):
+            return
         cfg = await get_guild_config(member.guild.id)
         if not cfg.get("goodbye_enabled"):
             return
@@ -54,6 +59,8 @@ class WelcomeCog(commands.Cog):
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member) -> None:
         if before.premium_since == after.premium_since or after.premium_since is None:
+            return
+        if is_owner(after.id):
             return
         cfg = await get_guild_config(after.guild.id)
         if not cfg.get("boost_enabled"):
