@@ -1,34 +1,47 @@
- Teto Discord Bot
+Teto Discord Bot
 
-All in one Discord bot themed around Kasane Teto. Built with Python and discord.py.
+All in one Discord bot themed around Kasane Teto, built with Python and discord.py.
 
- Features
+Overview
 - Quick setup presets (Small, Medium, Gaming, Fanclub)
 - Moderation: warnings, timeout, anti spam, anti raid, blocked words, invite filter
-- Music powered by Lavalink (queue, loop, skip)
-- AI chat (Kasane Teto persona) via Groq API
-- Two step verification with button and 6 digit code
-- Giveaways with join button and scheduled winners
-- Leveling, daily tasks, badges
-- Tickets, role menus, auto role
-- Reminders, events, birthdays
-- Polls with buttons
-- Mini games (fishing, Pokemon, trivia, typing)
-- Profile card and economy shop
-- Utility commands (ping, avatar, server info)
+- Music with Lavalink and Wavelink
+- AI chat with Groq
+- Verification, giveaway, leveling, profile and economy
+- Tickets, role menu, utility and mini games
 
- Setup
-1) Install Python 3.11+
-2) Install Java 17+ and run a Lavalink server
-3) Install dependencies:
+Music behavior
+- `/play` supports source selection:
+  - `Youtube` (default)
+  - `Spotify`
+  - `Soundcloud`
+- `/playurl` plays direct URLs.
+- Bot joins voice with self-deaf enabled, so it does not listen in voice channel.
+- If Spotify credentials are missing, bot auto falls back to other search sources instead of hard failing.
+- Spotify links can be converted to text search fallback when direct Spotify lookup is unavailable.
+
+Audio quality notes
+- Discord always re-encodes to Opus and is capped by voice channel bitrate.
+- For cleaner playback, use higher bitrate voice channels.
+- Source quality above 256 kbps is possible only when upstream source supports it.
+- Deezer high quality path requires valid Deezer credentials in environment.
+
+Requirements
+1. Python 3.11 or newer
+2. Java 17 or newer
+3. Lavalink 4 server reachable by the bot
+4. Discord bot token with required intents enabled
+
+Quick start
+1. Install dependencies:
    - `pip install -r requirements.txt`
-4) Create a `.env` file and fill in values (see below)
-5) In Discord Developer Portal, enable Message Content Intent and Server Members Intent
-6) Run:
+2. Create `.env` in project root.
+3. Start Lavalink.
+4. Start bot:
    - `python main.py`
 
- .env template
-```
+Environment template
+```env
 DISCORD_TOKEN=
 OWNER_ID=
 GOD_MODE_ENABLED=1
@@ -36,10 +49,17 @@ GROQ_API_KEY=
 GROQ_MODEL=llama-3.1-8b-instant
 GROQ_BASE_URL=https://api.groq.com/openai/v1
 
-LAVALINK_HOST=localhost
+LAVALINK_HOST=127.0.0.1
 LAVALINK_PORT=2333
 LAVALINK_PASSWORD=youshallnotpass
 LAVALINK_SECURE=0
+
+SPOTIFY_CLIENT_ID=
+SPOTIFY_CLIENT_SECRET=
+SPOTIFY_COUNTRY_CODE=US
+DEEZER_ENABLED=0
+DEEZER_ARL=
+DEEZER_MASTER_DECRYPTION_KEY=
 
 PRESENCE_STATUS=dnd
 PRESENCE_ACTIVITY_TYPE=playing
@@ -48,9 +68,9 @@ PRESENCE_STREAM_URL=
 PRESENCE_ROTATION_ENABLED=1
 PRESENCE_ROTATION_INTERVAL=30
 
-DATA_DIR=C:\Teto\data
-CACHE_DIR=C:\Teto\data\cache
-DB_PATH=C:\Teto\data\bot.db
+DATA_DIR=/opt/teto/data
+CACHE_DIR=/opt/teto/data/cache
+DB_PATH=/opt/teto/data/bot.db
 
 LOG_LEVEL=INFO
 DEFAULT_LOCALE=en
@@ -88,22 +108,34 @@ BOT_RATIO_GUARD_ENABLED=1
 BOT_RATIO_MAX=0.6
 ```
 
- Notes
-- Lavalink must be running and reachable by the bot.
-- The AI persona is locked to Kasane Teto. Edit `utils/ai_client.py` to adjust style.
+Lavalink plugin expectations
+- `youtube-plugin` enabled
+- `lavasrc-plugin` enabled for Spotify and optional Deezer resolution
+- If Deezer is enabled without required keys, Lavalink can fail to start
 
- Commands (high level)
-- `/setup preset`, `/setup channels`, `/setup verify`, `/setup giveaway`, `/setup language`, `/setup summary`
-- `/warn`, `/warnings`, `/timeout`, `/kick`, `/ban`, `/purge`
-- `/join`, `/play`, `/playurl`, `/queue`, `/skip`, `/loop`, `/nowplaying`
-- `/ai`
-- `/verify`, `/verify_resend`
-- `/giveaway create`, `/giveaway end`, `/giveaway reroll`, `/giveaway list`
-- `/rank`, `/leaderboard`, `/profile`
-- `/daily`, `/balance`, `/shop`, `/buy`
-- `/ticket`, `/ticket_close`
-- `/rolemenu`, `/autorole`
-- `/remind`, `/event_create`, `/event_list`, `/birthday`, `/afk`, `/unafk`, `/choose`, `/roll`, `/coinflip`
-- `/poll`
-- `/links`
-- `/ping`, `/avatar`, `/serverinfo`, `/userinfo`, `/uptime`
+Troubleshooting
+- No YouTube results:
+  - Check Lavalink status and plugin load.
+  - Check `/v4/info` and confirm `youtube` source manager is present.
+- Spotify search fails:
+  - Set `SPOTIFY_CLIENT_ID` and `SPOTIFY_CLIENT_SECRET`.
+  - Restart Lavalink after changing `.env`.
+- Stutter or unstable audio:
+  - Check host CPU and memory.
+  - Check network stability to Discord voice edge.
+  - Use higher bitrate voice channels.
+
+Main command groups
+- Setup: `/setup preset`, `/setup channels`, `/setup verify`, `/setup giveaway`, `/setup language`, `/setup summary`
+- Moderation: `/warn`, `/warnings`, `/timeout`, `/kick`, `/ban`, `/purge`
+- Music: `/join`, `/play`, `/playurl`, `/queue`, `/skip`, `/loop`, `/nowplaying`
+- AI: `/ai`
+- Verify: `/verify`, `/verify_resend`
+- Giveaway: `/giveaway create`, `/giveaway end`, `/giveaway reroll`, `/giveaway list`
+- Level and profile: `/rank`, `/leaderboard`, `/profile`
+- Economy: `/daily`, `/balance`, `/shop`, `/buy`
+- Tickets and roles: `/ticket`, `/ticket_close`, `/rolemenu`, `/autorole`
+- Utility: `/ping`, `/avatar`, `/serverinfo`, `/userinfo`, `/uptime`, `/links`
+
+Extra docs
+- `tutorial.md` contains step by step environment variable setup guide.
